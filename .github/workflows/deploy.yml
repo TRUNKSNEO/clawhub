@@ -13,12 +13,15 @@ jobs:
   preflight-secrets:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      can_deploy: ${{ steps.check.outputs.can_deploy }}
     env:
       CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       PLAYWRIGHT_AUTH_STORAGE_STATE_JSON: ${{ secrets.PLAYWRIGHT_AUTH_STORAGE_STATE_JSON }}
     steps:
-      - name: Check required deploy secrets
+      - id: check
+        name: Check deploy secrets
         run: |
           missing=()
 
@@ -31,9 +34,10 @@ jobs:
           fi
 
           if (( ${#missing[@]} > 0 )); then
-            echo "Missing required GitHub Actions secrets:" >&2
-            printf ' - %s\n' "${missing[@]}" >&2
-            exit 1
+            echo "can_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Skipping deploy; missing required GitHub Actions secrets: ${missing[*]}"
+          else
+            echo "can_deploy=true" >> "$GITHUB_OUTPUT"
           fi
 
           if [[ -z "$PLAYWRIGHT_AUTH_STORAGE_STATE_JSON" ]]; then
@@ -44,6 +48,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs: preflight-secrets
+    if: needs.preflight-secrets.outputs.can_deploy == 'true'
     env:
       CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
     steps:
@@ -71,7 +76,10 @@ jobs:
   deploy-web:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: deploy-convex
+    needs:
+      - preflight-secrets
+      - deploy-convex
+    if: needs.preflight-secrets.outputs.can_deploy == 'true'
     env:
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
       VITE_APP_BUILD_SHA: ${{ github.sha }}
@@ -98,8 +106,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     needs:
+      - preflight-secrets
       - deploy-convex
       - deploy-web
+    if: needs.preflight-secrets.outputs.can_deploy == 'true'
     env:
       PLAYWRIGHT_BASE_URL: https://clawhub.ai
     steps:
