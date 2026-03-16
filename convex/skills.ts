@@ -5,7 +5,6 @@ import { ConvexError, v, type Value } from 'convex/values'
 import type { Doc, Id } from './_generated/dataModel'
 import type { ActionCtx, MutationCtx, QueryCtx } from './_generated/server'
 import { internal } from './_generated/api'
-import schema from './schema'
 import {
   action,
   internalAction,
@@ -330,6 +329,22 @@ const NONSUSPICIOUS_SORT_INDEXES = {
   stars: 'by_nonsuspicious_stars',
   installs: 'by_nonsuspicious_installs',
 } as const
+
+// Index fields for getPage (avoids importing schema.ts which pulls in auth deps)
+const DIGEST_INDEX_FIELDS: Record<string, string[]> = {
+  by_active_created: ['softDeletedAt', 'createdAt'],
+  by_active_updated: ['softDeletedAt', 'updatedAt'],
+  by_active_name: ['softDeletedAt', 'displayName'],
+  by_active_stats_downloads: ['softDeletedAt', 'statsDownloads', 'updatedAt'],
+  by_active_stats_stars: ['softDeletedAt', 'statsStars', 'updatedAt'],
+  by_active_stats_installs_all_time: ['softDeletedAt', 'statsInstallsAllTime', 'updatedAt'],
+  by_nonsuspicious_created: ['softDeletedAt', 'isSuspicious', 'createdAt'],
+  by_nonsuspicious_updated: ['softDeletedAt', 'isSuspicious', 'updatedAt'],
+  by_nonsuspicious_name: ['softDeletedAt', 'isSuspicious', 'displayName'],
+  by_nonsuspicious_downloads: ['softDeletedAt', 'isSuspicious', 'statsDownloads', 'updatedAt'],
+  by_nonsuspicious_stars: ['softDeletedAt', 'isSuspicious', 'statsStars', 'updatedAt'],
+  by_nonsuspicious_installs: ['softDeletedAt', 'isSuspicious', 'statsInstallsAllTime', 'updatedAt'],
+}
 
 function isSkillVersionId(
   value: Id<'skillVersions'> | null | undefined,
@@ -2748,7 +2763,7 @@ export const listPublicPageV4 = query({
         targetMaxRows: fetchSize,
         order: dir,
         index: indexName,
-        schema,
+        indexFields: DIGEST_INDEX_FIELDS[indexName],
       })
 
       // Pair digests with their index keys, then filter
