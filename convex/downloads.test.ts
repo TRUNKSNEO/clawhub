@@ -24,6 +24,7 @@ const okRate = () => ({
 describe('downloads helpers', () => {
   afterEach(() => {
     vi.unstubAllEnvs()
+    vi.unstubAllGlobals()
   })
 
   it('calculates hour start boundaries', () => {
@@ -62,6 +63,17 @@ describe('downloads helpers', () => {
   })
 
   it('records zip downloads through the internal mutation path', async () => {
+    class MockResponse {
+      status: number
+      headers: Headers
+
+      constructor(_body?: BodyInit | null, init?: ResponseInit) {
+        this.status = init?.status ?? 200
+        this.headers = new Headers(init?.headers)
+      }
+    }
+    vi.stubGlobal('Response', MockResponse as unknown as typeof Response)
+
     const runQuery = vi.fn(async (_query: unknown, args: Record<string, unknown>) => {
       if (isRateLimitArgs(args)) return okRate()
       if ('slug' in args) {

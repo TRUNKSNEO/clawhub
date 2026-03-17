@@ -9,6 +9,8 @@ export default defineConfig({
     hookTimeout: 15_000,
     exclude: [
       '**/node_modules/**',
+      '**/.output/**',
+      '**/.nitro/**',
       '**/dist/**',
       '**/coverage/**',
       '**/convex/_generated/**',
@@ -35,6 +37,8 @@ export default defineConfig({
       ],
       exclude: [
         'node_modules/',
+        '.output/',
+        '.nitro/',
         'dist/',
         'coverage/',
         'convex/_generated/',
