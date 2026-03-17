@@ -2713,6 +2713,18 @@ export const listPublicPageV4 = query({
     const dir = args.dir ?? (sort === 'name' ? 'asc' : 'desc')
     const numItems = clampInt(args.numItems ?? 25, 1, MAX_PUBLIC_LIST_LIMIT)
 
+    // Highlighted skills use a completely different path: query skillBadges
+    // by kind to find highlighted skill IDs, then look up their digests.
+    // This avoids scanning thousands of rows in the sort index.
+    if (args.highlightedOnly) {
+      return fetchHighlightedPage(ctx, {
+        sort,
+        dir,
+        numItems,
+        nonSuspiciousOnly: args.nonSuspiciousOnly ?? false,
+      })
+    }
+
     const indexName = args.nonSuspiciousOnly
       ? NONSUSPICIOUS_SORT_INDEXES[sort]
       : SORT_INDEXES[sort]
@@ -2727,61 +2739,21 @@ export const listPublicPageV4 = query({
     const isFirstPage = !decodedCursor
     const startIndexKey: IndexKey = decodedCursor ?? eqPrefix
 
-    // For highlightedOnly, over-fetch since it's a JS filter
-    const fetchSize = args.highlightedOnly ? numItems * 2 : numItems
+    const result = await getPage(ctx, {
+      table: 'skillSearchDigest',
+      startIndexKey,
+      startInclusive: isFirstPage,
+      endIndexKey: eqPrefix,
+      endInclusive: true,
+      absoluteMaxRows: numItems,
+      order: dir,
+      index: indexName,
+      schema,
+    })
 
-    // Track (digest, indexKey) pairs through filtering
-    type DigestWithKey = { digest: Doc<'skillSearchDigest'>; indexKey: IndexKey }
-    const accepted: DigestWithKey[] = []
-    let hasMore = false
-    let lastFetchKey = startIndexKey
-    let lastFetchInclusive = isFirstPage
-
-    // Fetch up to 2 rounds (second only needed for highlightedOnly under-fill)
-    for (let round = 0; round < 2; round++) {
-      const result = await getPage(ctx, {
-        table: 'skillSearchDigest',
-        startIndexKey: lastFetchKey,
-        startInclusive: lastFetchInclusive,
-        endIndexKey: eqPrefix,
-        endInclusive: true,
-        // endIndexKey causes targetMaxRows to be ignored, so use absoluteMaxRows
-        absoluteMaxRows: fetchSize,
-        order: dir,
-        index: indexName,
-        schema,
-      })
-
-      // Pair digests with their index keys, then filter
-      const hydratables = result.page.map(digestToHydratableSkill)
-      const filtered = filterPublicSkillPage(hydratables, args)
-      const filteredIds = new Set(filtered.map((s) => s._id))
-
-      for (let i = 0; i < result.page.length; i++) {
-        if (filteredIds.has(result.page[i].skillId)) {
-          accepted.push({ digest: result.page[i], indexKey: result.indexKeys[i] })
-        }
-      }
-
-      hasMore = result.hasMore
-
-      // If we have enough items or no more data, stop
-      if (accepted.length >= numItems || !result.hasMore) break
-
-      // Only re-fetch for highlightedOnly (JS filter can shrink results)
-      if (!args.highlightedOnly) break
-
-      lastFetchKey = result.indexKeys[result.indexKeys.length - 1]
-      lastFetchInclusive = false
-    }
-
-    // Trim to requested size
-    const trimmed = accepted.slice(0, numItems)
-    const finalHasMore = trimmed.length < accepted.length || hasMore
-
-    // Build PublicSkillEntry[] from accepted digests
+    // Build PublicSkillEntry[] from digests
     const items: PublicSkillEntry[] = []
-    for (const { digest } of trimmed) {
+    for (const digest of result.page) {
       const hydratable = digestToHydratableSkill(digest)
       const publicSkill = toPublicSkill(hydratable)
       if (!publicSkill) continue
@@ -2801,21 +2773,93 @@ export const listPublicPageV4 = query({
       })
     }
 
-    // Encode cursor from the last accepted item's index key.
-    // If no items were accepted but hasMore is true, advance the cursor
-    // to the last fetched position so the next call doesn't restart.
     let nextCursor: string | null = null
-    if (finalHasMore) {
-      if (trimmed.length > 0) {
-        nextCursor = encodeIndexKey(trimmed[trimmed.length - 1].indexKey)
-      } else if (lastFetchKey && lastFetchKey.length > 0) {
-        nextCursor = encodeIndexKey(lastFetchKey)
-      }
+    if (result.hasMore && result.indexKeys.length > 0) {
+      nextCursor = encodeIndexKey(result.indexKeys[result.indexKeys.length - 1])
     }
 
-    return { page: items, hasMore: finalHasMore, nextCursor }
+    return { page: items, hasMore: result.hasMore, nextCursor }
   },
 })
+
+type SortKey = keyof typeof SORT_INDEXES
+
+/** Fetch highlighted skills via the skillBadges index, then sort in JS. */
+async function fetchHighlightedPage(
+  ctx: QueryCtx,
+  opts: {
+    sort: SortKey
+    dir: 'asc' | 'desc'
+    numItems: number
+    nonSuspiciousOnly: boolean
+  },
+) {
+  // Get all highlighted skill IDs from the skillBadges index (very few rows)
+  const badges = await ctx.db
+    .query('skillBadges')
+    .withIndex('by_kind_at', (q) => q.eq('kind', 'highlighted'))
+    .order('desc')
+    .take(MAX_LIST_TAKE)
+
+  // Look up digests for each highlighted skill
+  const digests: Doc<'skillSearchDigest'>[] = []
+  for (const badge of badges) {
+    const digest = await ctx.db
+      .query('skillSearchDigest')
+      .withIndex('by_skill', (q) => q.eq('skillId', badge.skillId))
+      .unique()
+    if (!digest || digest.softDeletedAt) continue
+    if (opts.nonSuspiciousOnly && digest.isSuspicious) continue
+    digests.push(digest)
+  }
+
+  // Sort in JS by the requested sort field
+  const multiplier = opts.dir === 'asc' ? 1 : -1
+  digests.sort((a, b) => {
+    switch (opts.sort) {
+      case 'downloads':
+        return ((a.statsDownloads ?? 0) - (b.statsDownloads ?? 0)) * multiplier
+      case 'stars':
+        return ((a.statsStars ?? 0) - (b.statsStars ?? 0)) * multiplier
+      case 'installs':
+        return ((a.statsInstallsAllTime ?? 0) - (b.statsInstallsAllTime ?? 0)) * multiplier
+      case 'updated':
+        return (a.updatedAt - b.updatedAt) * multiplier
+      case 'name':
+        return a.displayName.localeCompare(b.displayName) * multiplier
+      case 'newest':
+      default:
+        return (a.createdAt - b.createdAt) * multiplier
+    }
+  })
+
+  const trimmed = digests.slice(0, opts.numItems)
+
+  // Build PublicSkillEntry[]
+  const items: PublicSkillEntry[] = []
+  for (const digest of trimmed) {
+    const hydratable = digestToHydratableSkill(digest)
+    const publicSkill = toPublicSkill(hydratable)
+    if (!publicSkill) continue
+    const ownerInfo = digestToOwnerInfo(digest)
+    if (!ownerInfo?.owner) continue
+    const latestVersion = digest.latestVersionSummary
+      ? toPublicSkillListVersionFromSummary(
+          digest.latestVersionSummary,
+          digest.latestVersionId,
+        )
+      : null
+    items.push({
+      skill: publicSkill,
+      latestVersion,
+      ownerHandle: ownerInfo.ownerHandle,
+      owner: ownerInfo.owner,
+    })
+  }
+
+  // Highlighted skills are few enough to return in one page — no cursor needed
+  return { page: items, hasMore: false, nextCursor: null }
+}
 
 function filterPublicSkillPage(
   page: HydratableSkill[],
