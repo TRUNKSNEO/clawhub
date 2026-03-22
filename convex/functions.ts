@@ -20,6 +20,57 @@ import { extractDigestFields, upsertSkillSearchDigest } from "./lib/skillSearchD
 const triggers = new Triggers<DataModel>();
 
 type PackageDigestSyncCtx = Pick<MutationCtx, "db">;
+type LatestPackageRelease = Pick<
+  Doc<"packageReleases">,
+  | "_id"
+  | "createdAt"
+  | "version"
+  | "changelog"
+  | "compatibility"
+  | "capabilities"
+  | "verification"
+  | "distTags"
+>;
+
+function toPackageLatestVersionSummary(
+  release: LatestPackageRelease | null,
+): Doc<"packages">["latestVersionSummary"] {
+  if (!release) return undefined;
+  return {
+    version: release.version,
+    createdAt: release.createdAt,
+    changelog: release.changelog,
+    compatibility: release.compatibility,
+    capabilities: release.capabilities,
+    verification: release.verification,
+  };
+}
+
+async function getMostRecentActivePackageRelease(
+  ctx: PackageDigestSyncCtx,
+  packageId: Id<"packages">,
+): Promise<LatestPackageRelease | null> {
+  const page = await ctx.db
+    .query("packageReleases")
+    .withIndex("by_package_active_created", (q) =>
+      q.eq("packageId", packageId).eq("softDeletedAt", undefined),
+    )
+    .order("desc")
+    .paginate({ cursor: null, numItems: 1 });
+  const release = page.page[0];
+  return release
+    ? {
+        _id: release._id,
+        createdAt: release.createdAt,
+        version: release.version,
+        changelog: release.changelog,
+        compatibility: release.compatibility,
+        capabilities: release.capabilities,
+        verification: release.verification,
+        distTags: release.distTags,
+      }
+    : null;
+}
 
 async function syncPackageSearchDigest(
   ctx: PackageDigestSyncCtx,
@@ -60,6 +111,73 @@ export async function syncPackageSearchDigestForPackageId(
   const pkg = await ctx.db.get(packageId);
   if (!pkg) return;
   await syncPackageSearchDigest(ctx, pkg);
+}
+
+export async function syncPackageSearchDigestsForOwnerUserId(
+  ctx: PackageDigestSyncCtx,
+  ownerUserId: Id<"users"> | null | undefined,
+) {
+  if (!ownerUserId) return;
+  let cursor: string | null = null;
+  while (true) {
+    const page = await ctx.db
+      .query("packages")
+      .withIndex("by_owner", (q) => q.eq("ownerUserId", ownerUserId))
+      .paginate({ cursor, numItems: 100 });
+    for (const pkg of page.page) {
+      await syncPackageSearchDigest(ctx, pkg);
+    }
+    if (page.isDone) break;
+    cursor = page.continueCursor;
+  }
+}
+
+export async function repointPackageLatestRelease(
+  ctx: PackageDigestSyncCtx,
+  packageId: Id<"packages"> | null | undefined,
+  affectedReleaseId: Id<"packageReleases"> | null | undefined,
+) {
+  if (!packageId || !affectedReleaseId) return;
+  const pkg = await ctx.db.get(packageId);
+  if (!pkg) return;
+
+  const nextTags = Object.fromEntries(
+    Object.entries(pkg.tags).filter(([, releaseId]) => releaseId !== affectedReleaseId),
+  ) as Doc<"packages">["tags"];
+  const latestPointerAffected =
+    pkg.latestReleaseId === affectedReleaseId || pkg.tags.latest === affectedReleaseId;
+
+  if (!latestPointerAffected && Object.keys(nextTags).length === Object.keys(pkg.tags).length) {
+    return;
+  }
+
+  const nextLatest = latestPointerAffected
+    ? await getMostRecentActivePackageRelease(ctx, packageId)
+    : null;
+  if (latestPointerAffected && nextLatest && !(nextLatest.distTags ?? []).includes("latest")) {
+    await ctx.db.patch(nextLatest._id, {
+      distTags: [...(nextLatest.distTags ?? []), "latest"],
+    });
+  }
+
+  const patch: Partial<Doc<"packages">> = {
+    tags: latestPointerAffected && nextLatest ? { ...nextTags, latest: nextLatest._id } : nextTags,
+    updatedAt: Date.now(),
+  };
+  if (latestPointerAffected) {
+    patch.latestReleaseId = nextLatest?._id;
+    patch.latestVersionSummary = toPackageLatestVersionSummary(nextLatest);
+    patch.capabilityTags = nextLatest?.capabilities?.capabilityTags;
+    patch.executesCode =
+      typeof nextLatest?.capabilities?.executesCode === "boolean"
+        ? nextLatest.capabilities.executesCode
+        : undefined;
+    patch.compatibility = nextLatest?.compatibility;
+    patch.capabilities = nextLatest?.capabilities;
+    patch.verification = nextLatest?.verification;
+  }
+  await ctx.db.patch(pkg._id, patch);
+  await syncPackageSearchDigest(ctx, { ...pkg, ...patch });
 }
 
 triggers.register("skills", async (ctx, change) => {
@@ -107,7 +225,26 @@ triggers.register("packageReleases", async (ctx, change) => {
   }
   const packageId =
     change.operation === "delete" ? change.oldDoc.packageId : change.newDoc.packageId;
+  const affectedReleaseId =
+    change.operation === "delete" ? change.oldDoc._id : change.newDoc._id;
+  if (change.operation === "delete" || change.newDoc.softDeletedAt) {
+    await repointPackageLatestRelease(ctx, packageId, affectedReleaseId);
+    return;
+  }
   await syncPackageSearchDigestForPackageId(ctx, packageId);
+});
+
+triggers.register("users", async (ctx, change) => {
+  if (
+    change.operation === "update" &&
+    change.oldDoc.handle === change.newDoc.handle &&
+    change.oldDoc.deletedAt === change.newDoc.deletedAt &&
+    change.oldDoc.deactivatedAt === change.newDoc.deactivatedAt
+  ) {
+    return;
+  }
+  const ownerUserId = change.operation === "delete" ? change.id : change.newDoc._id;
+  await syncPackageSearchDigestsForOwnerUserId(ctx, ownerUserId);
 });
 
 export const mutation = customMutation(rawMutation, customCtx(triggers.wrapDB));
