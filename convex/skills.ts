@@ -85,7 +85,6 @@ const MAX_LIST_TAKE = 1000;
 const MAX_SKILL_CATALOG_SCAN_DOCUMENTS = 30_000;
 const MAX_SKILL_CATALOG_SCAN_PAGES = 200;
 const MAX_SKILL_CATALOG_SEARCH_PAGE_SIZE = 200;
-const MAX_SKILL_CATALOG_SEARCH_SCAN_PAGES = 200;
 const HARD_DELETE_BATCH_SIZE = 100;
 const HARD_DELETE_VERSION_BATCH_SIZE = 10;
 const HARD_DELETE_LEADERBOARD_BATCH_SIZE = 25;
@@ -2829,22 +2828,32 @@ export const searchPackageCatalogPublic = query({
     const targetCount = Math.max(1, Math.min(args.limit ?? 20, 100));
     const matches: Array<{ score: number; package: PublicSkillCatalogItem }> = [];
     const seen = new Set<string>();
-    const pageSize = Math.min(MAX_SKILL_CATALOG_SEARCH_PAGE_SIZE, Math.max(targetCount * 5, 50));
-    let cursor: string | null = null;
-    let done = false;
-    let loops = 0;
-    let remainingScanBudget = MAX_SKILL_CATALOG_SCAN_DOCUMENTS;
 
-    while (!done && loops < MAX_SKILL_CATALOG_SEARCH_SCAN_PAGES && remainingScanBudget > 0) {
-      loops += 1;
-      const effectivePageSize = Math.min(pageSize, remainingScanBudget);
-      if (effectivePageSize <= 0) break;
-      remainingScanBudget -= effectivePageSize;
-      const page = await paginator(ctx.db, schema)
+    const exactSkill = await resolveSkillBySlugOrAlias(ctx, queryText);
+    if (exactSkill.skill) {
+      const exactDigest = await ctx.db
+        .query("skillSearchDigest")
+        .withIndex("by_skill", (q) => q.eq("skillId", exactSkill.skill!._id))
+        .unique();
+      if (exactDigest && skillCatalogMatchesFilters(exactDigest, args)) {
+        const exactScore = scoreSkillCatalogResult(exactDigest, queryText);
+        if (exactScore > 0) {
+          seen.add(exactDigest.skillId);
+          matches.push({
+            score: exactScore,
+            package: toPublicSkillCatalogItem(exactDigest),
+          });
+        }
+      }
+    }
+
+    if (matches.length < targetCount) {
+      const pageSize = Math.min(MAX_SKILL_CATALOG_SEARCH_PAGE_SIZE, Math.max(targetCount * 5, 50));
+      const page = await ctx.db
         .query("skillSearchDigest")
         .withIndex("by_active_updated", (q) => q.eq("softDeletedAt", undefined))
         .order("desc")
-        .paginate({ cursor, numItems: effectivePageSize });
+        .paginate({ cursor: null, numItems: pageSize });
 
       for (const digest of page.page) {
         if (!skillCatalogMatchesFilters(digest, args)) continue;
@@ -2856,8 +2865,6 @@ export const searchPackageCatalogPublic = query({
           package: toPublicSkillCatalogItem(digest),
         });
       }
-      done = page.isDone;
-      cursor = page.continueCursor;
     }
 
     return matches

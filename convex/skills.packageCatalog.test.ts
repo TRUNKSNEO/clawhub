@@ -105,6 +105,7 @@ function makeDigest(
 
 function makeCtx(pages: Array<{ page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }>) {
   const pageByCursor = new Map<string | null, { page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }>();
+  const allDigests = pages.flatMap((page) => page.page);
   let cursor: string | null = null;
   for (const page of pages) {
     pageByCursor.set(cursor, page);
@@ -112,14 +113,37 @@ function makeCtx(pages: Array<{ page: Array<Record<string, unknown>>; isDone: bo
   }
   return {
     db: {
-      query: () => ({
-        withIndex: () => ({
-          order: () => ({
-            paginate: async ({ cursor: pageCursor }: { cursor: string | null }) =>
-              pageByCursor.get(pageCursor) ?? { page: [], isDone: true, continueCursor: "" },
+      query: (table: string) => {
+        if (table === "skills") {
+          return {
+            withIndex: (_index: string, builder: (q: { eq: (field: string, value: string) => { field: string; value: string } }) => { field: string; value: string }) => {
+              const constraint = builder({ eq: (field, value) => ({ field, value }) });
+              return {
+                unique: async () => {
+                  if (constraint.field !== "slug") return null;
+                  const digest = allDigests.find((entry) => entry.slug === constraint.value);
+                  if (!digest) return null;
+                  return {
+                    _id: digest.skillId,
+                    slug: digest.slug,
+                    softDeletedAt: digest.softDeletedAt,
+                  };
+                },
+              };
+            },
+          };
+        }
+
+        return {
+          withIndex: () => ({
+            order: () => ({
+              paginate: async ({ cursor: pageCursor }: { cursor: string | null }) =>
+                pageByCursor.get(pageCursor) ?? { page: [], isDone: true, continueCursor: "" },
+            }),
+            unique: async () => null,
           }),
-        }),
-      }),
+        };
+      },
     },
   };
 }
