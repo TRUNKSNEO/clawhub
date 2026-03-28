@@ -111,7 +111,7 @@ export async function getUserByHandleOrPersonalPublisher(
   if (user) return user;
 
   const publisher = await getPublisherByHandle(ctx, normalized);
-  if (!publisher || publisher.kind !== "user" || !publisher.linkedUserId) {
+  if (!publisher || !isPublisherActive(publisher) || publisher.kind !== "user" || !publisher.linkedUserId) {
     return null;
   }
 
