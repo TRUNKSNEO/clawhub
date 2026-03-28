@@ -6,7 +6,11 @@ import type { ActionCtx, MutationCtx } from "./_generated/server";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "./functions";
 import { assertAdmin, assertModerator, requireUser } from "./lib/access";
 import { syncGitHubProfile } from "./lib/githubAccount";
-import { ensurePersonalPublisherForUser, getPublisherByHandle } from "./lib/publishers";
+import {
+  ensurePersonalPublisherForUser,
+  getPublisherByHandle,
+  normalizePublisherHandle,
+} from "./lib/publishers";
 import { toPublicUser } from "./lib/public";
 import {
   getLatestActiveReservedHandle,
@@ -36,7 +40,7 @@ export const getByIdInternal = internalQuery({
 export const getByHandleInternal = internalQuery({
   args: { handle: v.string() },
   handler: async (ctx, args) => {
-    const normalizedHandle = normalizeReservedHandle(args.handle);
+    const normalizedHandle = normalizePublisherHandle(args.handle);
     if (!normalizedHandle) return null;
     return await ctx.db
       .query("users")
@@ -396,11 +400,21 @@ function clampInt(value: number, min: number, max: number) {
 export const getByHandle = query({
   args: { handle: v.string() },
   handler: async (ctx, args) => {
+    const normalizedHandle = normalizePublisherHandle(args.handle);
+    if (!normalizedHandle) return null;
+
     const user = await ctx.db
       .query("users")
-      .withIndex("handle", (q) => q.eq("handle", args.handle))
+      .withIndex("handle", (q) => q.eq("handle", normalizedHandle))
       .unique();
-    return toPublicUser(user);
+    if (user) return toPublicUser(user);
+
+    const publisher = await getPublisherByHandle(ctx, normalizedHandle);
+    if (!publisher || publisher.kind !== "user" || !publisher.linkedUserId) return null;
+
+    const linkedUser = await ctx.db.get(publisher.linkedUserId);
+    if (!linkedUser) return null;
+    return toPublicUser(linkedUser);
   },
 });
 

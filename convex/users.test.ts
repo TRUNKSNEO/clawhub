@@ -18,6 +18,7 @@ const { getAuthUserId } = await import("@convex-dev/auth/server");
 const { insertStatEvent } = await import("./skillStatEvents");
 const {
   ensureHandler,
+  getByHandle,
   list,
   searchInternal,
   banUserInternal,
@@ -32,6 +33,9 @@ type WrappedHandler<TArgs, TResult> = {
 };
 
 const meHandler = (me as unknown as WrappedHandler<Record<string, never>, unknown>)._handler;
+const getByHandleHandler = (
+  getByHandle as unknown as WrappedHandler<{ handle: string }, unknown>
+)._handler;
 
 function makeCtx() {
   const patch = vi.fn();
@@ -497,6 +501,120 @@ describe("me", () => {
 
     expect(result).toBeNull();
     expect(get).not.toHaveBeenCalled();
+  });
+});
+
+describe("users.getByHandle", () => {
+  it("normalizes the incoming handle before querying", async () => {
+    const unique = vi.fn(async () => ({
+      _id: "users:owner",
+      _creationTime: 1,
+      handle: "jaredforreal",
+      name: "jaredforreal",
+      displayName: "Jared",
+      image: undefined,
+      bio: undefined,
+    }));
+
+    const result = await getByHandleHandler(
+      {
+        db: {
+          query: vi.fn((table: string) => {
+            if (table !== "users") throw new Error(`Unexpected table ${table}`);
+            return {
+              withIndex: (
+                name: string,
+                builder?: (q: { eq: (field: string, value: string) => unknown }) => unknown,
+              ) => {
+                if (name !== "handle") throw new Error(`Unexpected index ${name}`);
+                let handle = "";
+                const q = {
+                  eq: (field: string, value: string) => {
+                    if (field === "handle") handle = value;
+                    return q;
+                  },
+                };
+                builder?.(q);
+                expect(handle).toBe("jaredforreal");
+                return { unique };
+              },
+            };
+          }),
+          get: vi.fn(),
+        },
+      } as never,
+      { handle: " @JaredForReal " },
+    );
+
+    expect(unique).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      _id: "users:owner",
+      handle: "jaredforreal",
+      displayName: "Jared",
+    });
+  });
+
+  it("falls back to the linked user for a personal publisher handle", async () => {
+    const userUnique = vi.fn(async () => null);
+    const publisherUnique = vi.fn(async () => ({
+      _id: "publishers:jaredforreal",
+      kind: "user",
+      handle: "jaredforreal",
+      linkedUserId: "users:owner",
+      displayName: "Jared",
+    }));
+    const get = vi.fn(async (id: string) =>
+      id === "users:owner"
+        ? {
+            _id: "users:owner",
+            _creationTime: 1,
+            handle: "jared",
+            name: "jaredforreal",
+            displayName: "Jared",
+            image: undefined,
+            bio: "Profile",
+          }
+        : null,
+    );
+
+    const result = await getByHandleHandler(
+      {
+        db: {
+          query: vi.fn((table: string) => {
+            if (table === "users") {
+              return {
+                withIndex: (name: string) => {
+                  if (name !== "handle") throw new Error(`Unexpected users index ${name}`);
+                  return { unique: userUnique };
+                },
+              };
+            }
+            if (table === "publishers") {
+              return {
+                withIndex: (name: string) => {
+                  if (name !== "by_handle") throw new Error(`Unexpected publishers index ${name}`);
+                  return { unique: publisherUnique };
+                },
+              };
+            }
+            throw new Error(`Unexpected table ${table}`);
+          }),
+          get,
+        },
+      } as never,
+      { handle: "jaredforreal" },
+    );
+
+    expect(userUnique).toHaveBeenCalledOnce();
+    expect(publisherUnique).toHaveBeenCalledOnce();
+    expect(get).toHaveBeenCalledWith("users:owner");
+    expect(result).toMatchObject({
+      _id: "users:owner",
+      handle: "jared",
+      name: "jaredforreal",
+      displayName: "Jared",
+      bio: "Profile",
+    });
   });
 });
 
