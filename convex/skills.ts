@@ -461,7 +461,15 @@ async function syncSkillModerationFromLatestVersion(
 
 function buildConflictingSkillUrl(
   skill: Doc<"skills">,
-  owner: Doc<"users"> | Doc<"publishers"> | null | undefined,
+  owner:
+    | {
+        _id: Id<"users"> | Id<"publishers">;
+        handle?: string | null;
+        deletedAt?: number | null;
+        deactivatedAt?: number | null;
+      }
+    | null
+    | undefined,
 ) {
   if (!owner || owner.deletedAt || owner.deactivatedAt || !isPublicSkillDoc(skill)) return null;
   const ownerParam = owner.handle?.trim() || String(owner._id);
@@ -471,7 +479,15 @@ function buildConflictingSkillUrl(
 
 function buildSlugTakenErrorMessage(
   skill: Doc<"skills">,
-  owner: Doc<"users"> | Doc<"publishers"> | null | undefined,
+  owner:
+    | {
+        _id: Id<"users"> | Id<"publishers">;
+        handle?: string | null;
+        deletedAt?: number | null;
+        deactivatedAt?: number | null;
+      }
+    | null
+    | undefined,
 ) {
   if (!owner || owner.deletedAt || owner.deactivatedAt) {
     return (
@@ -487,7 +503,15 @@ function buildSlugTakenErrorMessage(
 
 function buildAliasTakenErrorMessage(
   skill: Doc<"skills">,
-  owner: Doc<"users"> | Doc<"publishers"> | null | undefined,
+  owner:
+    | {
+        _id: Id<"users"> | Id<"publishers">;
+        handle?: string | null;
+        deletedAt?: number | null;
+        deactivatedAt?: number | null;
+      }
+    | null
+    | undefined,
 ) {
   const base = "Slug redirects to an existing skill. Choose a different slug.";
   const url = buildConflictingSkillUrl(skill, owner);
