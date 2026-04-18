@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 
 const PREFERENCES_KEY = "clawhub-preferences";
 
@@ -66,36 +66,85 @@ const defaultPreferences: UserPreferences = {
 
 // Simple event emitter for cross-tab sync
 const listeners = new Set<() => void>();
+let cachedPreferencesRaw: string | null = null;
+let cachedPreferencesSnapshot: UserPreferences = defaultPreferences;
+let removeStorageListener: (() => void) | null = null;
+
+function normalizePreferences(parsed: Partial<UserPreferences> | null): UserPreferences {
+  if (!parsed) return defaultPreferences;
+  return { ...defaultPreferences, ...parsed };
+}
+
+function readStoredPreferences(): UserPreferences {
+  if (typeof window === "undefined") return defaultPreferences;
+
+  const stored = window.localStorage.getItem(PREFERENCES_KEY);
+  if (stored === cachedPreferencesRaw) {
+    return cachedPreferencesSnapshot;
+  }
+
+  cachedPreferencesRaw = stored;
+  if (!stored) {
+    cachedPreferencesSnapshot = defaultPreferences;
+    return cachedPreferencesSnapshot;
+  }
+
+  try {
+    const parsed = JSON.parse(stored) as Partial<UserPreferences>;
+    cachedPreferencesSnapshot = normalizePreferences(parsed);
+  } catch {
+    cachedPreferencesSnapshot = defaultPreferences;
+  }
+
+  return cachedPreferencesSnapshot;
+}
 
 function subscribe(listener: () => void) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+
+  if (typeof window !== "undefined" && !removeStorageListener) {
+    const handleStorage = (event: StorageEvent) => {
+      if (event.storageArea !== window.localStorage || event.key !== PREFERENCES_KEY) {
+        return;
+      }
+
+      cachedPreferencesRaw = null;
+      cachedPreferencesSnapshot = readStoredPreferences();
+      notifyListeners();
+    };
+
+    window.addEventListener("storage", handleStorage);
+    removeStorageListener = () => {
+      window.removeEventListener("storage", handleStorage);
+      removeStorageListener = null;
+    };
+  }
+
+  return () => {
+    listeners.delete(listener);
+
+    if (listeners.size === 0 && removeStorageListener) {
+      removeStorageListener();
+    }
+  };
 }
 
 function notifyListeners() {
   listeners.forEach((listener) => listener());
 }
 
-function getStoredPreferences(): UserPreferences {
-  if (typeof window === "undefined") return defaultPreferences;
-  try {
-    const stored = window.localStorage.getItem(PREFERENCES_KEY);
-    if (!stored) return defaultPreferences;
-    const parsed = JSON.parse(stored) as Partial<UserPreferences>;
-    return { ...defaultPreferences, ...parsed };
-  } catch {
-    return defaultPreferences;
-  }
-}
-
 function savePreferences(prefs: UserPreferences) {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(PREFERENCES_KEY, JSON.stringify(prefs));
-    notifyListeners();
+    const serialized = JSON.stringify(prefs);
+    cachedPreferencesRaw = serialized;
+    cachedPreferencesSnapshot = prefs;
+    window.localStorage.setItem(PREFERENCES_KEY, serialized);
   } catch {
     // Storage might be full or disabled
   }
+
+  notifyListeners();
 }
 
 // Server snapshot for SSR
@@ -106,7 +155,7 @@ function getServerSnapshot(): UserPreferences {
 export function usePreferences() {
   const preferences = useSyncExternalStore(
     subscribe,
-    getStoredPreferences,
+    readStoredPreferences,
     getServerSnapshot
   );
 
@@ -114,13 +163,13 @@ export function usePreferences() {
     key: K,
     value: UserPreferences[K]
   ) => {
-    const current = getStoredPreferences();
+    const current = readStoredPreferences();
     const updated = { ...current, [key]: value };
     savePreferences(updated);
   }, []);
 
   const updatePreferences = useCallback((updates: Partial<UserPreferences>) => {
-    const current = getStoredPreferences();
+    const current = readStoredPreferences();
     const updated = { ...current, ...updates };
     savePreferences(updated);
   }, []);
@@ -163,3 +212,4 @@ export function usePreferences() {
 }
 
 export { defaultPreferences };
+export { readStoredPreferences as getStoredPreferencesSnapshot };
