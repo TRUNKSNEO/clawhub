@@ -111,7 +111,7 @@ function AboutPage() {
         </aside>
 
         <section className="about-panel about-panel-categories">
-          <div className="home-section-header">
+          <div className="home-section-header about-categories-header">
             <h2 className="home-section-title">Immediate rejection categories</h2>
           </div>
           <div className="about-grid">
