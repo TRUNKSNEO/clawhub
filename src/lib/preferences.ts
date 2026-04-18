@@ -68,6 +68,7 @@ const defaultPreferences: UserPreferences = {
 const listeners = new Set<() => void>();
 let cachedPreferencesRaw: string | null = null;
 let cachedPreferencesSnapshot: UserPreferences = defaultPreferences;
+let hasCachedPreferences = false;
 let removeStorageListener: (() => void) | null = null;
 
 function normalizePreferences(parsed: Partial<UserPreferences> | null): UserPreferences {
@@ -75,28 +76,35 @@ function normalizePreferences(parsed: Partial<UserPreferences> | null): UserPref
   return { ...defaultPreferences, ...parsed };
 }
 
+function parsePreferences(raw: string | null): UserPreferences {
+  if (!raw) return defaultPreferences;
+  try {
+    const parsed = JSON.parse(raw) as Partial<UserPreferences>;
+    return normalizePreferences(parsed);
+  } catch {
+    return defaultPreferences;
+  }
+}
+
 function readStoredPreferences(): UserPreferences {
   if (typeof window === "undefined") return defaultPreferences;
 
-  const stored = window.localStorage.getItem(PREFERENCES_KEY);
-  if (stored === cachedPreferencesRaw) {
-    return cachedPreferencesSnapshot;
-  }
-
-  cachedPreferencesRaw = stored;
-  if (!stored) {
-    cachedPreferencesSnapshot = defaultPreferences;
-    return cachedPreferencesSnapshot;
-  }
-
   try {
-    const parsed = JSON.parse(stored) as Partial<UserPreferences>;
-    cachedPreferencesSnapshot = normalizePreferences(parsed);
-  } catch {
-    cachedPreferencesSnapshot = defaultPreferences;
-  }
+    const stored = window.localStorage.getItem(PREFERENCES_KEY);
+    if (hasCachedPreferences && stored === cachedPreferencesRaw) {
+      return cachedPreferencesSnapshot;
+    }
 
-  return cachedPreferencesSnapshot;
+    cachedPreferencesRaw = stored;
+    cachedPreferencesSnapshot = parsePreferences(stored);
+    hasCachedPreferences = true;
+    return cachedPreferencesSnapshot;
+  } catch {
+    cachedPreferencesRaw = null;
+    cachedPreferencesSnapshot = defaultPreferences;
+    hasCachedPreferences = true;
+    return cachedPreferencesSnapshot;
+  }
 }
 
 function subscribe(listener: () => void) {
@@ -109,16 +117,8 @@ function subscribe(listener: () => void) {
       }
 
       cachedPreferencesRaw = event.newValue;
-      if (!event.newValue) {
-        cachedPreferencesSnapshot = defaultPreferences;
-      } else {
-        try {
-          const parsed = JSON.parse(event.newValue) as Partial<UserPreferences>;
-          cachedPreferencesSnapshot = normalizePreferences(parsed);
-        } catch {
-          cachedPreferencesSnapshot = defaultPreferences;
-        }
-      }
+      cachedPreferencesSnapshot = parsePreferences(event.newValue);
+      hasCachedPreferences = true;
       notifyListeners();
     };
 
@@ -146,9 +146,10 @@ function savePreferences(prefs: UserPreferences) {
   if (typeof window === "undefined") return;
   try {
     const serialized = JSON.stringify(prefs);
+    window.localStorage.setItem(PREFERENCES_KEY, serialized);
     cachedPreferencesRaw = serialized;
     cachedPreferencesSnapshot = prefs;
-    window.localStorage.setItem(PREFERENCES_KEY, serialized);
+    hasCachedPreferences = true;
   } catch {
     // Storage might be full or disabled
   }
