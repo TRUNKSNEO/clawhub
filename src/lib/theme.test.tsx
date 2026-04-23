@@ -58,7 +58,7 @@ describe("theme", () => {
       "clawhub-theme-selection",
       JSON.stringify({ theme: "hub", mode: "light" }),
     );
-    expect(getStoredThemeSelection()).toEqual({ theme: "hub", mode: "light" });
+    expect(getStoredThemeSelection()).toEqual({ theme: "claw", mode: "light" });
 
     window.localStorage.clear();
     window.localStorage.setItem("clawhub-theme", "dark");
