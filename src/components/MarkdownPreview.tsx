@@ -70,15 +70,16 @@ export function MarkdownPreview({ children, className, highlight = true }: Markd
   const [highlighter, setHighlighter] = useState<AnyHighlighter | null>(null);
 
   useEffect(() => {
-    if (!highlight) return;
     let cancelled = false;
-    loadHighlighter()
-      .then((h) => {
-        if (!cancelled) setHighlighter(h);
-      })
-      .catch(() => {
-        // Shiki failed to initialize — keep plain rendering.
-      });
+    if (highlight) {
+      loadHighlighter()
+        .then((h) => {
+          if (!cancelled) setHighlighter(h);
+        })
+        .catch(() => {
+          // Shiki failed to initialize — keep plain rendering.
+        });
+    }
     return () => {
       cancelled = true;
     };
