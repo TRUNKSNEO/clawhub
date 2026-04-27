@@ -34,6 +34,7 @@ convex/_generated/ai/*
 skills-lock.json
 */skills/*
 !.agents/skills/
-!.agents/skills/**
+!.agents/skills/convex*/
+!.agents/skills/convex*/**
 skills/*
 .codex/*
