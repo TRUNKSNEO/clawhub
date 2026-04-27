@@ -2,7 +2,8 @@ name: Update Convex AI Files
 
 on:
   schedule:
-    - cron: "17 10 * * 1"
+    # Midnight Pacific during daylight saving time. GitHub cron uses UTC.
+    - cron: "0 7 * * 1"
   workflow_dispatch:
 
 concurrency:
