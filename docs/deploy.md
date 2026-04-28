@@ -84,7 +84,7 @@ Ensure Convex env is set (auth + embeddings):
 - `OPENAI_API_KEY`
 - `SITE_URL` (your web app URL)
 - Optional webhook env (see `docs/webhook.md`)
-- Optional: `GITHUB_TOKEN` (recommended; raises GitHub account lookup limit used by publish gate)
+- Optional: `GITHUB_TOKEN` (recommended; raises GitHub API limits used by publish gates)
 
 ## 2) Deploy web app (Vercel)
 
