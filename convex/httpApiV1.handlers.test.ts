@@ -2519,7 +2519,11 @@ describe("httpApiV1 handlers", () => {
   });
 
   it("packages search forwards executesCode and capabilityTag", async () => {
-    const runQuery = vi.fn().mockResolvedValue([]);
+    const runQuery = vi.fn((_, args: Record<string, unknown>) => {
+      if ("paginationOpts" in args) return { page: [], isDone: true, continueCursor: "" };
+      if ("query" in args) return [];
+      return null;
+    });
     const runMutation = vi.fn().mockResolvedValue(okRate());
     const response = await __handlers.packagesGetRouterV1Handler(
       makeCtx({ runQuery, runMutation }),
@@ -2531,10 +2535,9 @@ describe("httpApiV1 handlers", () => {
     expect(runQuery).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        query: "test",
-        limit: 5,
         executesCode: true,
         capabilityTag: "tools",
+        paginationOpts: { cursor: null, numItems: 50 },
       }),
     );
     expect(findRateLimitCallArgs(runMutation)).toMatchObject({
@@ -2700,10 +2703,9 @@ describe("httpApiV1 handlers", () => {
   it("plugins search defaults to plugin package families", async () => {
     const runQuery = vi.fn((_, args: Record<string, unknown>) => {
       if (args.family === "code-plugin") {
-        return [
-          {
-            score: 10,
-            package: {
+        return {
+          page: [
+            {
               name: "weather-code",
               displayName: "Weather Code",
               family: "code-plugin",
@@ -2712,14 +2714,15 @@ describe("httpApiV1 handlers", () => {
               createdAt: 10,
               updatedAt: 100,
             },
-          },
-        ];
+          ],
+          isDone: true,
+          continueCursor: "",
+        };
       }
       if (args.family === "bundle-plugin") {
-        return [
-          {
-            score: 20,
-            package: {
+        return {
+          page: [
+            {
               name: "weather-bundle",
               displayName: "Weather Bundle",
               family: "bundle-plugin",
@@ -2728,8 +2731,10 @@ describe("httpApiV1 handlers", () => {
               createdAt: 20,
               updatedAt: 200,
             },
-          },
-        ];
+          ],
+          isDone: true,
+          continueCursor: "",
+        };
       }
       throw new Error(`unexpected family ${String(args.family)}`);
     });
@@ -2751,8 +2756,7 @@ describe("httpApiV1 handlers", () => {
     for (const [, args] of runQuery.mock.calls) {
       expect(args).toEqual(
         expect.objectContaining({
-          query: "weather",
-          limit: 7,
+          paginationOpts: { cursor: null, numItems: 50 },
         }),
       );
     }
@@ -2761,28 +2765,24 @@ describe("httpApiV1 handlers", () => {
   it("plugins search dedupes and sorts results from both plugin families", async () => {
     const runQuery = vi.fn((_, args: Record<string, unknown>) => {
       if (args.family === "code-plugin") {
-        return [
-          {
-            score: 5,
-            package: makeCatalogItem("shared-plugin", { family: "code-plugin", updatedAt: 100 }),
-          },
-          {
-            score: 30,
-            package: makeCatalogItem("code-only", { family: "code-plugin", updatedAt: 50 }),
-          },
-        ];
+        return {
+          page: [
+            makeCatalogItem("shared-plugin", { family: "code-plugin", updatedAt: 100 }),
+            makeCatalogItem("plugin-code", { family: "code-plugin", updatedAt: 50 }),
+          ],
+          isDone: true,
+          continueCursor: "",
+        };
       }
       if (args.family === "bundle-plugin") {
-        return [
-          {
-            score: 50,
-            package: makeCatalogItem("bundle-only", { family: "bundle-plugin", updatedAt: 80 }),
-          },
-          {
-            score: 40,
-            package: makeCatalogItem("shared-plugin", { family: "bundle-plugin", updatedAt: 60 }),
-          },
-        ];
+        return {
+          page: [
+            makeCatalogItem("plugin-bundle", { family: "bundle-plugin", updatedAt: 80 }),
+            makeCatalogItem("shared-plugin", { family: "bundle-plugin", updatedAt: 60 }),
+          ],
+          isDone: true,
+          continueCursor: "",
+        };
       }
       throw new Error(`unexpected family ${String(args.family)}`);
     });
@@ -2797,15 +2797,14 @@ describe("httpApiV1 handlers", () => {
     expect(
       (await response.json()).results.map(
         (entry: { score: number; package: { family: string; name: string } }) => ({
-          score: entry.score,
           family: entry.package.family,
           name: entry.package.name,
         }),
       ),
     ).toEqual([
-      { score: 50, family: "bundle-plugin", name: "bundle-only" },
-      { score: 40, family: "bundle-plugin", name: "shared-plugin" },
-      { score: 30, family: "code-plugin", name: "code-only" },
+      { family: "bundle-plugin", name: "plugin-bundle" },
+      { family: "code-plugin", name: "plugin-code" },
+      { family: "code-plugin", name: "shared-plugin" },
     ]);
   });
 
@@ -2832,7 +2831,12 @@ describe("httpApiV1 handlers", () => {
 
   it("packages search forwards viewerUserId for authenticated private package search", async () => {
     vi.mocked(getAuthUserId).mockResolvedValue("users:owner" as never);
-    const runQuery = vi.fn().mockResolvedValue([]);
+    const runQuery = vi.fn((_, args: Record<string, unknown>) => {
+      if ("userId" in args) return { _id: args.userId };
+      if ("paginationOpts" in args) return { page: [], isDone: true, continueCursor: "" };
+      if ("query" in args) return [];
+      return null;
+    });
     const runMutation = vi.fn().mockResolvedValue(okRate());
 
     const response = await __handlers.packagesGetRouterV1Handler(
@@ -2844,9 +2848,9 @@ describe("httpApiV1 handlers", () => {
     expect(runQuery).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        query: "secret",
         channel: "private",
         viewerUserId: "users:owner",
+        paginationOpts: { cursor: null, numItems: 50 },
       }),
     );
   });
@@ -2878,7 +2882,8 @@ describe("httpApiV1 handlers", () => {
       if (query === internal.users.getByIdInternal) {
         throw new Error("Table mismatch");
       }
-      if ("query" in args && args.query === "secret") return [];
+      if ("paginationOpts" in args) return { page: [], isDone: true, continueCursor: "" };
+      if ("query" in args) return [];
       return null;
     });
     const runMutation = vi.fn().mockResolvedValue(okRate());
@@ -2896,9 +2901,9 @@ describe("httpApiV1 handlers", () => {
     expect(runQuery).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        query: "secret",
         channel: "community",
         viewerUserId: undefined,
+        paginationOpts: { cursor: null, numItems: 50 },
       }),
     );
   });

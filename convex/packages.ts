@@ -45,7 +45,7 @@ import { hashSkillFiles } from "./lib/skills";
 import { runStaticPublishScan } from "./lib/staticPublishScan";
 
 const MAX_PACKAGE_SCAN_DOCUMENTS = 30_000;
-const MAX_PUBLIC_LIST_SCAN_PAGES = 200;
+const MAX_PUBLIC_LIST_SCAN_PAGES = 100;
 const MAX_SEARCH_PAGE_SIZE = 200;
 const MAX_SEARCH_SCAN_DOCUMENTS = 1_000;
 const MAX_SEARCH_SCAN_PAGES = 20;
@@ -1183,9 +1183,7 @@ async function listPackagePageImpl(
     loops += 1;
     const effectivePageSize = Math.min(
       remainingScanBudget,
-      offset > 0 && pageSize
-        ? Math.max(pageSize, offset + 1)
-        : Math.max(targetCount * 3, targetCount),
+      offset > 0 ? Math.max(offset + 1, targetCount) : targetCount,
     );
     if (effectivePageSize <= 0) break;
     remainingScanBudget -= effectivePageSize;
