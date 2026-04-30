@@ -5,6 +5,9 @@ import type { QueryCtx } from "./_generated/server";
 import { internalQuery } from "./functions";
 
 const MAX_EXPORT_PAGE_SIZE = 50;
+const REDACTION_POLICY_VERSION = "public-signals-v1";
+const SOURCE_TABLES = ["skillVersions", "packageReleases"] as const;
+const SCANNER_SOURCES = ["static", "virustotal", "llm", "moderation_consensus"] as const;
 type StoredVtAnalysis = Doc<"skillVersions">["vtAnalysis"];
 type StoredLlmAnalysis = Doc<"skillVersions">["llmAnalysis"];
 
@@ -70,41 +73,66 @@ export const getArtifactExportBoundsInternal = internalQuery({
 		sourceKind: v.union(v.literal("skill"), v.literal("package")),
 	},
 	handler: async (ctx, args) => {
-		if (args.sourceKind === "skill") {
-			const first = await ctx.db
-				.query("skillVersions")
-				.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
-				.order("asc")
-				.first();
-			const last = await ctx.db
-				.query("skillVersions")
-				.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
-				.order("desc")
-				.first();
-			return {
-				sourceKind: args.sourceKind,
-				minCreatedAt: first?.createdAt ?? null,
-				maxCreatedAt: last?.createdAt ?? null,
-			};
-		}
+		return await getActiveCreatedBounds(ctx, args.sourceKind);
+	},
+});
 
+export const getDatasetLineageInternal = internalQuery({
+	args: {
+		mode: v.optional(v.literal("public")),
+	},
+	handler: async (ctx, args) => {
+		const sourceBounds = [
+			await getActiveCreatedBounds(ctx, "skill"),
+			await getActiveCreatedBounds(ctx, "package"),
+		];
+		return {
+			exportMode: args.mode ?? "public",
+			generatedAt: Date.now(),
+			maxExportPageSize: MAX_EXPORT_PAGE_SIZE,
+			redactionPolicyVersion: REDACTION_POLICY_VERSION,
+			sourceTables: SOURCE_TABLES,
+			scannerSources: SCANNER_SOURCES,
+			sourceBounds,
+		};
+	},
+});
+
+async function getActiveCreatedBounds(ctx: QueryCtx, sourceKind: "skill" | "package") {
+	if (sourceKind === "skill") {
 		const first = await ctx.db
-			.query("packageReleases")
+			.query("skillVersions")
 			.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
 			.order("asc")
 			.first();
 		const last = await ctx.db
-			.query("packageReleases")
+			.query("skillVersions")
 			.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
 			.order("desc")
 			.first();
 		return {
-			sourceKind: args.sourceKind,
+			sourceKind,
 			minCreatedAt: first?.createdAt ?? null,
 			maxCreatedAt: last?.createdAt ?? null,
 		};
-	},
-});
+	}
+
+	const first = await ctx.db
+		.query("packageReleases")
+		.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+		.order("asc")
+		.first();
+	const last = await ctx.db
+		.query("packageReleases")
+		.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+		.order("desc")
+		.first();
+	return {
+		sourceKind,
+		minCreatedAt: first?.createdAt ?? null,
+		maxCreatedAt: last?.createdAt ?? null,
+	};
+}
 
 async function skillVersionPageToExportRows(ctx: QueryCtx, versions: Array<Doc<"skillVersions">>) {
 	const rows = [];
