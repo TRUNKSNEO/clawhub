@@ -1,6 +1,9 @@
-import { spawnSync } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { createWriteStream, type WriteStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { parseConvexJson } from "./convexOutput";
 import {
 	normalizeArtifactExport,
@@ -9,11 +12,19 @@ import {
 	type SourceKind,
 } from "./normalize";
 
+const execFileAsync = promisify(execFile);
+
 type ConvexPage = {
 	page: ArtifactExportInput[];
 	isDone: boolean;
 	continueCursor: string;
 	exportMode: "public";
+};
+
+type ConvexBounds = {
+	sourceKind: SourceKind;
+	minCreatedAt: number | null;
+	maxCreatedAt: number | null;
 };
 
 type Options = {
@@ -24,11 +35,43 @@ type Options = {
 	mode: "public";
 	limit: number | null;
 	pageSize: number;
+	concurrency: number;
+	shards: number;
 	outDir: string;
 	sourceKind: SourceKind | "all";
 };
 
+type ExportShard = {
+	sourceKind: SourceKind;
+	createdAtGte?: number;
+	createdAtLt?: number;
+	label: string;
+};
+
+type SnapshotState = {
+	sourceArtifacts: number;
+	rowCounts: {
+		artifacts: number;
+		scanResults: number;
+		staticFindings: number;
+		labels: number;
+		splits: number;
+	};
+	scannerVersions: Set<string>;
+	modelNames: Set<string>;
+};
+
+type SnapshotWriters = {
+	artifacts: WriteStream;
+	scanResults: WriteStream;
+	staticFindings: WriteStream;
+	labels: WriteStream;
+	splits: WriteStream;
+};
+
 const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_CONCURRENCY = 6;
+const DEFAULT_SHARDS = 12;
 const DEFAULT_OUT_DIR = ".data/security-dataset/snapshots";
 const CONVEX_RUN_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
 const SOURCE_KINDS: SourceKind[] = ["skill", "package"];
@@ -37,109 +80,153 @@ async function main() {
 	const options = parseArgs(process.argv.slice(2));
 	const snapshotId = buildSnapshotId(options);
 	const snapshotDir = resolve(options.outDir, snapshotId);
-	const inputs = await fetchArtifactInputs(options);
-	const rows = normalizeArtifactExport(inputs);
-	const manifest = buildManifest({ options, snapshotId, rows, inputs });
+	const writers = options.dryRun ? null : await openSnapshotWriters(snapshotDir);
+	let writersClosed = false;
+	const state = createSnapshotState();
 
-	if (options.dryRun) {
-		console.log(JSON.stringify({ snapshotId, dryRun: true, manifest }, null, 2));
-		return;
+	try {
+		const shards = await buildExportShards(options);
+		await exportShards({ options, shards, state, writers });
+		const manifest = buildManifest({ options, snapshotId, state, shardCount: shards.length });
+
+		if (options.dryRun) {
+			console.log(JSON.stringify({ snapshotId, dryRun: true, manifest }, null, 2));
+			return;
+		}
+
+		if (!writers) throw new Error("Snapshot writers were not opened.");
+		await closeSnapshotWriters(writers);
+		writersClosed = true;
+		await writeFile(join(snapshotDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+		console.log(JSON.stringify({ snapshotId, snapshotDir, manifest }, null, 2));
+	} catch (error) {
+		if (writers && !writersClosed) await closeSnapshotWriters(writers).catch(() => {});
+		throw error;
 	}
-
-	await mkdir(snapshotDir, { recursive: true });
-	await writeFile(join(snapshotDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-	await writeJsonl(join(snapshotDir, "artifacts.jsonl"), rows.artifacts);
-	await writeJsonl(join(snapshotDir, "scan_results.jsonl"), rows.scanResults);
-	await writeJsonl(join(snapshotDir, "static_findings.jsonl"), rows.staticFindings);
-	await writeJsonl(join(snapshotDir, "labels.jsonl"), rows.labels);
-	await writeJsonl(join(snapshotDir, "splits.jsonl"), rows.splits);
-
-	console.log(JSON.stringify({ snapshotId, snapshotDir, manifest }, null, 2));
 }
 
-async function fetchArtifactInputs(options: Options) {
+async function buildExportShards(options: Options) {
 	const sourceKinds = options.sourceKind === "all" ? SOURCE_KINDS : [options.sourceKind];
-	const inputs: ArtifactExportInput[] = [];
+	const shards: ExportShard[] = [];
 
 	for (const sourceKind of sourceKinds) {
-		let cursor: string | null = null;
-		while (true) {
-			const remaining = options.limit === null ? options.pageSize : options.limit - inputs.length;
-			if (remaining <= 0) return inputs;
-			const pageSize = Math.min(options.pageSize, remaining);
-			const page = runConvexPage(options, sourceKind, cursor, pageSize);
-			inputs.push(...page.page);
-			if (page.isDone) break;
-			cursor = page.continueCursor;
-		}
+		const bounds = await runConvexBounds(options, sourceKind);
+		shards.push(...boundsToShards(bounds, options.shards));
 	}
 
-	return inputs;
+	return shards;
 }
 
-function runConvexPage(
+async function exportShards(input: {
+	options: Options;
+	shards: ExportShard[];
+	state: SnapshotState;
+	writers: SnapshotWriters | null;
+}) {
+	const { options, shards, state, writers } = input;
+	await runWithConcurrency(shards, options.concurrency, async (shard) => {
+		await exportShard({ options, shard, state, writers });
+	});
+}
+
+async function exportShard(input: {
+	options: Options;
+	shard: ExportShard;
+	state: SnapshotState;
+	writers: SnapshotWriters | null;
+}) {
+	const { options, shard, state, writers } = input;
+	let cursor: string | null = null;
+	while (!isLimitReached(options, state)) {
+		const page = await runConvexPage(options, shard, cursor, options.pageSize);
+		const remaining =
+			options.limit === null ? page.page.length : options.limit - state.sourceArtifacts;
+		if (remaining <= 0) return;
+		const inputs = page.page.slice(0, remaining);
+		if (inputs.length > 0) {
+			await processArtifactInputs({ inputs, state, writers });
+			console.error(
+				`[snapshot] ${shard.label} +${inputs.length} artifacts (${state.sourceArtifacts} total)`,
+			);
+		}
+		if (page.isDone || inputs.length < page.page.length) return;
+		cursor = page.continueCursor;
+	}
+}
+
+async function runConvexPage(
 	options: Options,
-	sourceKind: SourceKind,
+	shard: ExportShard,
 	cursor: string | null,
 	numItems: number,
-): ConvexPage {
+): Promise<ConvexPage> {
 	const args = {
-		sourceKind,
+		sourceKind: shard.sourceKind,
 		mode: options.mode,
+		createdAtGte: shard.createdAtGte,
+		createdAtLt: shard.createdAtLt,
 		paginationOpts: { cursor, numItems },
 	};
-	const commandArgs = ["convex", "run"];
-	if (options.prod) commandArgs.push("--prod");
-	if (options.deployment) commandArgs.push("--deployment", options.deployment);
-	if (options.push) commandArgs.push("--push", "--typecheck=disable");
-	commandArgs.push("securityDataset:listArtifactExportPageInternal", JSON.stringify(args));
+	return runConvexJson<ConvexPage>(options, "securityDataset:listArtifactExportPageInternal", args);
+}
 
-	const result = spawnSync("bunx", commandArgs, {
-		cwd: process.cwd(),
-		encoding: "utf8",
-		env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-		maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
+async function runConvexBounds(options: Options, sourceKind: SourceKind): Promise<ConvexBounds> {
+	return runConvexJson<ConvexBounds>(options, "securityDataset:getArtifactExportBoundsInternal", {
+		sourceKind,
 	});
-	if (result.error) {
-		console.error(result.error.message);
-		process.exit(1);
+}
+
+async function runConvexJson<T>(options: Options, functionName: string, args: unknown): Promise<T> {
+	const commandArgs = buildConvexRunArgs(options, functionName, args);
+	try {
+		const result = await execFileAsync("bunx", commandArgs, {
+			cwd: process.cwd(),
+			encoding: "utf8",
+			env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+			maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
+		});
+		return parseConvexJson(result.stdout) as T;
+	} catch (error) {
+		if (
+			error &&
+			typeof error === "object" &&
+			"stderr" in error &&
+			typeof error.stderr === "string"
+		) {
+			process.stderr.write(error.stderr);
+		}
+		throw error;
 	}
-	if (result.status !== 0) {
-		process.stderr.write(result.stderr || result.stdout);
-		process.exit(result.status ?? 1);
-	}
-	return parseConvexJson(result.stdout) as ConvexPage;
 }
 
 function buildManifest(input: {
 	options: Options;
 	snapshotId: string;
-	rows: NormalizedDatasetRows;
-	inputs: ArtifactExportInput[];
+	state: SnapshotState;
+	shardCount: number;
 }) {
-	const { options, snapshotId, rows, inputs } = input;
+	const { options, snapshotId, state, shardCount } = input;
 	return {
 		snapshot_id: snapshotId,
 		created_at: new Date().toISOString(),
 		repo_git_sha: gitSha(),
 		convex_deployment: options.deployment ?? (options.prod ? "prod" : "configured-dev"),
 		export_mode: options.mode,
+		page_size: options.pageSize,
+		concurrency: options.concurrency,
+		shards: options.shards,
+		shard_count: shardCount,
 		row_counts: {
-			source_artifacts: inputs.length,
-			artifacts: rows.artifacts.length,
-			scan_results: rows.scanResults.length,
-			static_findings: rows.staticFindings.length,
-			labels: rows.labels.length,
-			splits: rows.splits.length,
+			source_artifacts: state.sourceArtifacts,
+			artifacts: state.rowCounts.artifacts,
+			scan_results: state.rowCounts.scanResults,
+			static_findings: state.rowCounts.staticFindings,
+			labels: state.rowCounts.labels,
+			splits: state.rowCounts.splits,
 		},
-		scanner_versions: Array.from(
-			new Set(
-				rows.scanResults.flatMap((row) => (row.scanner_version ? [row.scanner_version] : [])),
-			),
-		).sort(),
-		model_names: Array.from(
-			new Set(rows.scanResults.flatMap((row) => (row.model ? [row.model] : []))),
-		).sort(),
+		scanner_versions: Array.from(state.scannerVersions).sort(),
+		model_names: Array.from(state.modelNames).sort(),
 		redaction_policy_version: "public-signals-v1",
 		source_tables: ["skillVersions", "packageReleases"],
 	};
@@ -155,11 +242,129 @@ function buildSnapshotId(options: Options) {
 	return `clawhub-${deployment}-${timestamp}-${gitSha().slice(0, 8)}`;
 }
 
-async function writeJsonl(path: string, rows: unknown[]) {
-	await writeFile(
-		path,
-		rows.length > 0 ? `${rows.map((row) => JSON.stringify(row)).join("\n")}\n` : "",
+function createSnapshotState(): SnapshotState {
+	return {
+		sourceArtifacts: 0,
+		rowCounts: {
+			artifacts: 0,
+			scanResults: 0,
+			staticFindings: 0,
+			labels: 0,
+			splits: 0,
+		},
+		scannerVersions: new Set(),
+		modelNames: new Set(),
+	};
+}
+
+async function processArtifactInputs(input: {
+	inputs: ArtifactExportInput[];
+	state: SnapshotState;
+	writers: SnapshotWriters | null;
+}) {
+	const { inputs, state, writers } = input;
+	const rows = normalizeArtifactExport(inputs);
+	state.sourceArtifacts += inputs.length;
+	state.rowCounts.artifacts += rows.artifacts.length;
+	state.rowCounts.scanResults += rows.scanResults.length;
+	state.rowCounts.staticFindings += rows.staticFindings.length;
+	state.rowCounts.labels += rows.labels.length;
+	state.rowCounts.splits += rows.splits.length;
+	for (const row of rows.scanResults) {
+		if (row.scanner_version) state.scannerVersions.add(row.scanner_version);
+		if (row.model) state.modelNames.add(row.model);
+	}
+
+	if (!writers) return;
+	await writeNormalizedRows(writers, rows);
+}
+
+async function openSnapshotWriters(snapshotDir: string): Promise<SnapshotWriters> {
+	await mkdir(snapshotDir, { recursive: true });
+	return {
+		artifacts: createWriteStream(join(snapshotDir, "artifacts.jsonl"), { encoding: "utf8" }),
+		scanResults: createWriteStream(join(snapshotDir, "scan_results.jsonl"), { encoding: "utf8" }),
+		staticFindings: createWriteStream(join(snapshotDir, "static_findings.jsonl"), {
+			encoding: "utf8",
+		}),
+		labels: createWriteStream(join(snapshotDir, "labels.jsonl"), { encoding: "utf8" }),
+		splits: createWriteStream(join(snapshotDir, "splits.jsonl"), { encoding: "utf8" }),
+	};
+}
+
+async function closeSnapshotWriters(writers: SnapshotWriters) {
+	await Promise.all(Object.values(writers).map((stream) => endStream(stream)));
+}
+
+async function endStream(stream: WriteStream) {
+	stream.end();
+	await once(stream, "finish");
+}
+
+async function writeNormalizedRows(writers: SnapshotWriters, rows: NormalizedDatasetRows) {
+	await writeJsonlRows(writers.artifacts, rows.artifacts);
+	await writeJsonlRows(writers.scanResults, rows.scanResults);
+	await writeJsonlRows(writers.staticFindings, rows.staticFindings);
+	await writeJsonlRows(writers.labels, rows.labels);
+	await writeJsonlRows(writers.splits, rows.splits);
+}
+
+async function writeJsonlRows(stream: WriteStream, rows: unknown[]) {
+	if (rows.length === 0) return;
+	const chunk = `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`;
+	if (!stream.write(chunk)) await once(stream, "drain");
+}
+
+function boundsToShards(bounds: ConvexBounds, shardCount: number): ExportShard[] {
+	if (bounds.minCreatedAt === null || bounds.maxCreatedAt === null) return [];
+	const start = bounds.minCreatedAt;
+	const end = bounds.maxCreatedAt + 1;
+	const span = Math.max(1, end - start);
+	const width = Math.ceil(span / shardCount);
+	const shards: ExportShard[] = [];
+	for (let shardIndex = 0; shardIndex < shardCount; shardIndex += 1) {
+		const createdAtGte = start + shardIndex * width;
+		const createdAtLt = Math.min(end, createdAtGte + width);
+		if (createdAtGte >= end) break;
+		shards.push({
+			sourceKind: bounds.sourceKind,
+			createdAtGte,
+			createdAtLt,
+			label: `${bounds.sourceKind}:${shardIndex + 1}/${shardCount}`,
+		});
+	}
+	return shards;
+}
+
+function buildConvexRunArgs(options: Options, functionName: string, args: unknown) {
+	const commandArgs = ["convex", "run"];
+	if (options.prod) commandArgs.push("--prod");
+	if (options.deployment) commandArgs.push("--deployment", options.deployment);
+	if (options.push) commandArgs.push("--push", "--typecheck=disable");
+	commandArgs.push(functionName, JSON.stringify(args));
+	return commandArgs;
+}
+
+async function runWithConcurrency<T>(
+	items: T[],
+	concurrency: number,
+	worker: (item: T) => Promise<void>,
+) {
+	let next = 0;
+	await Promise.all(
+		Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+			while (true) {
+				const index = next;
+				next += 1;
+				if (index >= items.length) return;
+				await worker(items[index]!);
+			}
+		}),
 	);
+}
+
+function isLimitReached(options: Options, state: SnapshotState) {
+	return options.limit !== null && state.sourceArtifacts >= options.limit;
 }
 
 function gitSha() {
@@ -177,6 +382,8 @@ function parseArgs(args: string[]): Options {
 		mode: "public",
 		limit: null,
 		pageSize: DEFAULT_PAGE_SIZE,
+		concurrency: DEFAULT_CONCURRENCY,
+		shards: DEFAULT_SHARDS,
 		outDir: DEFAULT_OUT_DIR,
 		sourceKind: "all",
 	};
@@ -195,6 +402,10 @@ function parseArgs(args: string[]): Options {
 			options.limit = readPositiveInt(readValue(args, ++index, arg), arg);
 		} else if (arg === "--page-size") {
 			options.pageSize = readPositiveInt(readValue(args, ++index, arg), arg);
+		} else if (arg === "--concurrency") {
+			options.concurrency = readPositiveInt(readValue(args, ++index, arg), arg);
+		} else if (arg === "--shards") {
+			options.shards = readPositiveInt(readValue(args, ++index, arg), arg);
 		} else if (arg === "--out-dir") {
 			options.outDir = readValue(args, ++index, arg);
 		} else if (arg === "--source-kind") {

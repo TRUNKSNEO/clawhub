@@ -12,6 +12,8 @@ export const listArtifactExportPageInternal = internalQuery({
 	args: {
 		sourceKind: v.union(v.literal("skill"), v.literal("package")),
 		mode: v.optional(v.literal("public")),
+		createdAtGte: v.optional(v.number()),
+		createdAtLt: v.optional(v.number()),
 		paginationOpts: paginationOptsValidator,
 	},
 	handler: async (ctx, args) => {
@@ -22,7 +24,15 @@ export const listArtifactExportPageInternal = internalQuery({
 		if (args.sourceKind === "skill") {
 			const page = await ctx.db
 				.query("skillVersions")
-				.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+				.withIndex("by_active_created", (q) => {
+					const range = q.eq("softDeletedAt", undefined);
+					if (args.createdAtGte !== undefined && args.createdAtLt !== undefined) {
+						return range.gte("createdAt", args.createdAtGte).lt("createdAt", args.createdAtLt);
+					}
+					if (args.createdAtGte !== undefined) return range.gte("createdAt", args.createdAtGte);
+					if (args.createdAtLt !== undefined) return range.lt("createdAt", args.createdAtLt);
+					return range;
+				})
 				.order("asc")
 				.paginate(paginationOpts);
 			return {
@@ -35,7 +45,15 @@ export const listArtifactExportPageInternal = internalQuery({
 
 		const page = await ctx.db
 			.query("packageReleases")
-			.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+			.withIndex("by_active_created", (q) => {
+				const range = q.eq("softDeletedAt", undefined);
+				if (args.createdAtGte !== undefined && args.createdAtLt !== undefined) {
+					return range.gte("createdAt", args.createdAtGte).lt("createdAt", args.createdAtLt);
+				}
+				if (args.createdAtGte !== undefined) return range.gte("createdAt", args.createdAtGte);
+				if (args.createdAtLt !== undefined) return range.lt("createdAt", args.createdAtLt);
+				return range;
+			})
 			.order("asc")
 			.paginate(paginationOpts);
 		return {
@@ -43,6 +61,47 @@ export const listArtifactExportPageInternal = internalQuery({
 			isDone: page.isDone,
 			continueCursor: page.continueCursor,
 			exportMode: args.mode ?? "public",
+		};
+	},
+});
+
+export const getArtifactExportBoundsInternal = internalQuery({
+	args: {
+		sourceKind: v.union(v.literal("skill"), v.literal("package")),
+	},
+	handler: async (ctx, args) => {
+		if (args.sourceKind === "skill") {
+			const first = await ctx.db
+				.query("skillVersions")
+				.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+				.order("asc")
+				.first();
+			const last = await ctx.db
+				.query("skillVersions")
+				.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+				.order("desc")
+				.first();
+			return {
+				sourceKind: args.sourceKind,
+				minCreatedAt: first?.createdAt ?? null,
+				maxCreatedAt: last?.createdAt ?? null,
+			};
+		}
+
+		const first = await ctx.db
+			.query("packageReleases")
+			.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+			.order("asc")
+			.first();
+		const last = await ctx.db
+			.query("packageReleases")
+			.withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+			.order("desc")
+			.first();
+		return {
+			sourceKind: args.sourceKind,
+			minCreatedAt: first?.createdAt ?? null,
+			maxCreatedAt: last?.createdAt ?? null,
 		};
 	},
 });
