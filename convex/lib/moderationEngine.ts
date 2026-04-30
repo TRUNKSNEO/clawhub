@@ -74,6 +74,10 @@ const HARDCODED_CONNECTION_ID_PATTERN =
   /["']connection_id["']\s*:\s*["'][0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}["']/i;
 const GOOGLE_SHEETS_SPREADSHEET_URL_PATTERN =
   /https?:\/\/[^\s"'`]*\/spreadsheets\/([A-Za-z0-9_-]{20,})\/[^\s"'`]*/i;
+const DESTRUCTIVE_DELETE_PATTERN =
+  /\brm\s+-[A-Za-z]*r[A-Za-z]*f[A-Za-z]*\s+(["']?)(\/root\/\.openclaw\/|\/home\/[^/\s"'`]+\/\.openclaw\/|\/Users\/[^/\s"'`]+\/\.openclaw\/|~\/\.openclaw\/|\$HOME\/\.openclaw\/|\$\{HOME\}\/\.openclaw\/|\/etc\/|\/usr\/|\/opt\/|\/Library\/|\/Applications\/)[^\s"'`;|&)]*\1/i;
+const SHELL_POSITIONAL_ASSIGNMENT_PATTERN =
+  /^\s*([A-Z_][A-Z0-9_]*)=(["']?)\$(?:[1-9][0-9]*|@|\*)\2\s*(?:#.*)?$/gm;
 const SECRET_ASSIGNMENT_PATTERN =
   /\b(?:api[_\s-]?(?:secret|key)|secret[_\s-]?key|access[_\s-]?token|auth[_\s-]?token|bearer[_\s-]?token|password)\b\s*[:=]\s*["'`]?([A-Za-z0-9][A-Za-z0-9._~+/=-]{15,})["'`]?/i;
 const AUTH_HEADER_SECRET_PATTERN =
@@ -128,6 +132,60 @@ function findHardcodedSecret(content: string) {
       line: i + 1,
       text: line.replaceAll(secret, "[REDACTED]"),
     };
+  }
+  return null;
+}
+
+function hasNearbyConfirmationGate(lines: string[], commandIndex: number) {
+  const start = Math.max(0, commandIndex - 8);
+  const context = lines.slice(start, commandIndex + 1).join("\n");
+  return /(?:ask|prompt|require|confirm|confirmation|approval|continue\?|yes\/no).{0,120}(?:user|before|delet|remov|rm\s+-rf)/is.test(
+    context,
+  );
+}
+
+function findUnguardedDestructiveDelete(content: string) {
+  const lines = content.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!DESTRUCTIVE_DELETE_PATTERN.test(lines[i])) continue;
+    if (hasNearbyConfirmationGate(lines, i)) continue;
+    return { line: i + 1, text: lines[i] };
+  }
+  return null;
+}
+
+function hasShellVariableValidation(content: string, variable: string, useIndex: number) {
+  const escaped = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const beforeUse = content.slice(0, useIndex);
+  const variableReference = String.raw`(?:\$\{${escaped}\}|\$${escaped})`;
+  const lengthCheck = new RegExp(String.raw`\$\{#${escaped}\}\s*(?:-[a-z]\s+)?(?:[<>!=]=?|-[gl][te])`, "m");
+  const controlCharStrip = new RegExp(
+    String.raw`(?:tr\s+-d\s+["']?\\(?:000|x00).{0,80}\\(?:037|x1[fF]|177|x7[fF])|${escaped}\s*=.*tr\s+-d)`,
+    "s",
+  );
+  const explicitValidation = new RegExp(
+    String.raw`(?:validate|sanitize|strip|clean)[A-Za-z0-9_ -]{0,60}${variableReference}|${variableReference}.{0,60}(?:validate|sanitize|strip|clean)`,
+    "is",
+  );
+
+  return lengthCheck.test(beforeUse) || controlCharStrip.test(beforeUse) || explicitValidation.test(beforeUse);
+}
+
+function findUnsafeBrowserTextInput(content: string) {
+  for (const assignment of content.matchAll(SHELL_POSITIONAL_ASSIGNMENT_PATTERN)) {
+    const variable = assignment[1];
+    if (!variable) continue;
+
+    const escaped = variable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const browserTextPattern = new RegExp(
+      String.raw`\bbrowser\s+action=act\b[^\n]*\bkind=["']?type["']?[^\n]*\btext=(?:"\$${escaped}"|'\$${escaped}'|\$${escaped})(?![A-Za-z0-9_])`,
+      "i",
+    );
+    const match = content.match(browserTextPattern);
+    if (!match || match.index === undefined) continue;
+    if (hasShellVariableValidation(content, variable, match.index)) continue;
+
+    return findLineAtIndex(content, match.index);
   }
   return null;
 }
@@ -260,6 +318,18 @@ function scanCodeFile(
     });
   }
 
+  const unsafeBrowserTextInput = findUnsafeBrowserTextInput(content);
+  if (unsafeBrowserTextInput) {
+    addFinding(findings, {
+      code: REASON_CODES.UNSAFE_BROWSER_TEXT_INPUT,
+      severity: "warn",
+      file: path,
+      line: unsafeBrowserTextInput.line,
+      message: "Shell positional input is typed into browser automation without validation.",
+      evidence: unsafeBrowserTextInput.text,
+    });
+  }
+
   if (/stratum\+tcp|stratum\+ssl|coinhive|cryptonight|xmrig/i.test(content)) {
     const match = findFirstLine(content, /stratum\+tcp|stratum\+ssl|coinhive|cryptonight|xmrig/i);
     addFinding(findings, {
@@ -366,6 +436,30 @@ function scanMarkdownFile(path: string, content: string, findings: ModerationFin
       line: match.line,
       message: "Install prompt contains an obfuscated terminal payload.",
       evidence: match.text,
+    });
+  }
+
+  const destructiveDelete = findUnguardedDestructiveDelete(content);
+  if (destructiveDelete) {
+    addFinding(findings, {
+      code: REASON_CODES.DESTRUCTIVE_DELETE_COMMAND,
+      severity: "warn",
+      file: path,
+      line: destructiveDelete.line,
+      message: "Documentation contains a destructive delete command without an explicit confirmation gate.",
+      evidence: destructiveDelete.text,
+    });
+  }
+
+  const unsafeBrowserTextInput = findUnsafeBrowserTextInput(content);
+  if (unsafeBrowserTextInput) {
+    addFinding(findings, {
+      code: REASON_CODES.UNSAFE_BROWSER_TEXT_INPUT,
+      severity: "warn",
+      file: path,
+      line: unsafeBrowserTextInput.line,
+      message: "Shell positional input is typed into browser automation without validation.",
+      evidence: unsafeBrowserTextInput.text,
     });
   }
 

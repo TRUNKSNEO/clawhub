@@ -436,6 +436,158 @@ describe("moderationEngine", () => {
     expect(result.status).toBe("clean");
   });
 
+  it("flags destructive troubleshooting deletes without a confirmation gate", () => {
+    const result = runStaticModerationScan({
+      slug: "stt-simple",
+      displayName: "STT Simple",
+      summary: "Speech-to-text helper",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "SKILL.md", size: 512 }],
+      fileContents: [
+        {
+          path: "SKILL.md",
+          content: [
+            "## Troubleshooting",
+            "If reinstalling is needed, run:",
+            "```bash",
+            "# Reinstall",
+            "rm -rf /root/.openclaw/venv/stt-simple",
+            "/root/.openclaw/workspace/skills/stt-simple/install.sh",
+            "```",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.destructive_delete_command");
+    expect(result.status).toBe("suspicious");
+  });
+
+  it("allows destructive troubleshooting deletes with an explicit confirmation gate", () => {
+    const result = runStaticModerationScan({
+      slug: "stt-simple",
+      displayName: "STT Simple",
+      summary: "Speech-to-text helper",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "SKILL.md", size: 512 }],
+      fileContents: [
+        {
+          path: "SKILL.md",
+          content: [
+            "## Troubleshooting",
+            "Before deleting the environment, ask the user for explicit confirmation.",
+            "Only continue after the user answers yes.",
+            "```bash",
+            "rm -rf /root/.openclaw/venv/stt-simple",
+            "/root/.openclaw/workspace/skills/stt-simple/install.sh",
+            "```",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).not.toContain("suspicious.destructive_delete_command");
+    expect(result.status).toBe("clean");
+  });
+
+  it("does not flag ordinary project cleanup commands", () => {
+    const result = runStaticModerationScan({
+      slug: "build-helper",
+      displayName: "Build Helper",
+      summary: "Cleans local build outputs",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "SKILL.md", size: 256 }],
+      fileContents: [
+        {
+          path: "SKILL.md",
+          content: "Reset the project cache with `rm -rf node_modules dist .turbo`.",
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).not.toContain("suspicious.destructive_delete_command");
+    expect(result.status).toBe("clean");
+  });
+
+  it("flags shell positional input passed directly to browser typing", () => {
+    const result = runStaticModerationScan({
+      slug: "wechat-helper",
+      displayName: "WeChat Helper",
+      summary: "Send WeChat messages",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "SKILL.md", size: 1024 }],
+      fileContents: [
+        {
+          path: "SKILL.md",
+          content: [
+            "```bash",
+            'MESSAGE="$1"',
+            'browser action=act kind="type" ref="input-area" text="$MESSAGE" targetId="$TARGET_ID"',
+            "```",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.unsafe_browser_text_input");
+    expect(result.status).toBe("suspicious");
+  });
+
+  it("checks every positional shell assignment before browser typing", () => {
+    const result = runStaticModerationScan({
+      slug: "wechat-helper",
+      displayName: "WeChat Helper",
+      summary: "Send WeChat messages",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "send.sh", size: 1024 }],
+      fileContents: [
+        {
+          path: "send.sh",
+          content: [
+            'TARGET_ID="$1"',
+            'MESSAGE="$2"',
+            'browser action=act kind="type" ref="input-area" text="$MESSAGE" targetId="$TARGET_ID"',
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.unsafe_browser_text_input");
+    expect(result.status).toBe("suspicious");
+  });
+
+  it("allows browser typing after basic shell input validation", () => {
+    const result = runStaticModerationScan({
+      slug: "wechat-helper",
+      displayName: "WeChat Helper",
+      summary: "Send WeChat messages",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "send.sh", size: 1024 }],
+      fileContents: [
+        {
+          path: "send.sh",
+          content: [
+            'MESSAGE="$1"',
+            "if [ ${#MESSAGE} -gt 2000 ]; then",
+            '  echo "message too long"',
+            "  exit 1",
+            "fi",
+            'browser action=act kind="type" ref="input-area" text="$MESSAGE" targetId="$TARGET_ID"',
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).not.toContain("suspicious.unsafe_browser_text_input");
+    expect(result.status).toBe("clean");
+  });
+
   it("upgrades merged verdict to malicious when VT is malicious", () => {
     const snapshot = buildModerationSnapshot({
       staticScan: {
