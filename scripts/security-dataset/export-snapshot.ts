@@ -73,6 +73,7 @@ type SnapshotWriters = {
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_SHARDS = 12;
+const DEFAULT_MAX_CONVEX_ATTEMPTS = 4;
 const DEFAULT_OUT_DIR = ".data/security-dataset/snapshots";
 const CONVEX_RUN_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
 const SOURCE_KINDS: SourceKind[] = ["skill", "package"];
@@ -166,36 +167,54 @@ async function runConvexPage(
 		createdAtLt: shard.createdAtLt,
 		paginationOpts: { cursor, numItems },
 	};
-	return runConvexJson<ConvexPage>(options, "securityDataset:listArtifactExportPageInternal", args);
+	return runConvexJson<ConvexPage>(
+		options,
+		"securityDataset:listArtifactExportPageInternal",
+		args,
+		isConvexPage,
+	);
 }
 
 async function runConvexBounds(options: Options, sourceKind: SourceKind): Promise<ConvexBounds> {
-	return runConvexJson<ConvexBounds>(options, "securityDataset:getArtifactExportBoundsInternal", {
-		sourceKind,
-	});
+	return runConvexJson<ConvexBounds>(
+		options,
+		"securityDataset:getArtifactExportBoundsInternal",
+		{ sourceKind },
+		isConvexBounds,
+	);
 }
 
-async function runConvexJson<T>(options: Options, functionName: string, args: unknown): Promise<T> {
+async function runConvexJson<T>(
+	options: Options,
+	functionName: string,
+	args: unknown,
+	validate: (value: unknown) => value is T,
+): Promise<T> {
 	const commandArgs = buildConvexRunArgs(options, functionName, args);
-	try {
-		const result = await execFileAsync("bunx", commandArgs, {
-			cwd: process.cwd(),
-			encoding: "utf8",
-			env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
-			maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
-		});
-		return parseConvexJson(result.stdout) as T;
-	} catch (error) {
-		if (
-			error &&
-			typeof error === "object" &&
-			"stderr" in error &&
-			typeof error.stderr === "string"
-		) {
-			process.stderr.write(error.stderr);
+	let lastError: unknown = null;
+	for (let attempt = 1; attempt <= DEFAULT_MAX_CONVEX_ATTEMPTS; attempt += 1) {
+		try {
+			const result = await execFileAsync("bunx", commandArgs, {
+				cwd: process.cwd(),
+				encoding: "utf8",
+				env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+				maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
+			});
+			const parsed = parseConvexJson(result.stdout);
+			if (validate(parsed)) return parsed;
+			throw new Error(`Invalid Convex response for ${functionName}: ${summarizeValue(parsed)}`);
+		} catch (error) {
+			lastError = error;
+			if (attempt === DEFAULT_MAX_CONVEX_ATTEMPTS) break;
+			console.error(
+				`[snapshot] retrying ${functionName} after attempt ${attempt}: ${errorMessage(error)}`,
+			);
+			await delay(attempt * 500);
 		}
-		throw error;
 	}
+
+	writeCommandErrorOutput(lastError);
+	throw lastError;
 }
 
 function buildManifest(input: {
@@ -362,6 +381,52 @@ async function runWithConcurrency<T>(
 
 function isLimitReached(options: Options, state: SnapshotState) {
 	return options.limit !== null && state.sourceArtifacts >= options.limit;
+}
+
+function isConvexPage(value: unknown): value is ConvexPage {
+	return (
+		isRecord(value) &&
+		Array.isArray(value.page) &&
+		typeof value.isDone === "boolean" &&
+		typeof value.continueCursor === "string" &&
+		value.exportMode === "public"
+	);
+}
+
+function isConvexBounds(value: unknown): value is ConvexBounds {
+	return (
+		isRecord(value) &&
+		(value.sourceKind === "skill" || value.sourceKind === "package") &&
+		(typeof value.minCreatedAt === "number" || value.minCreatedAt === null) &&
+		(typeof value.maxCreatedAt === "number" || value.maxCreatedAt === null)
+	);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null;
+}
+
+function delay(ms: number) {
+	return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error: unknown) {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function summarizeValue(value: unknown) {
+	const json = JSON.stringify(value);
+	if (!json) return String(value);
+	return json.length > 500 ? `${json.slice(0, 500)}...` : json;
+}
+
+function writeCommandErrorOutput(error: unknown) {
+	if (!isRecord(error)) return;
+	if (typeof error.stderr === "string" && error.stderr.length > 0) {
+		process.stderr.write(error.stderr);
+	} else if (typeof error.stdout === "string" && error.stdout.length > 0) {
+		process.stderr.write(error.stdout);
+	}
 }
 
 function gitSha() {
