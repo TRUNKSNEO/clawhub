@@ -979,7 +979,7 @@ export async function publishSkillV1Handler(ctx: ActionCtx, request: Request) {
 }
 
 function hasAcceptedLegacyLicenseTerms(acceptLicenseTerms: boolean | undefined) {
-  return acceptLicenseTerms !== false;
+  return acceptLicenseTerms === true;
 }
 
 type TransferDecisionAction = "accept" | "reject" | "cancel";
