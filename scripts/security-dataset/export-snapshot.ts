@@ -29,6 +29,7 @@ type Options = {
 
 const DEFAULT_PAGE_SIZE = 50;
 const DEFAULT_OUT_DIR = ".data/security-dataset/snapshots";
+const CONVEX_RUN_MAX_BUFFER_BYTES = 128 * 1024 * 1024;
 const SOURCE_KINDS: SourceKind[] = ["skill", "package"];
 
 async function main() {
@@ -96,7 +97,12 @@ function runConvexPage(
 		cwd: process.cwd(),
 		encoding: "utf8",
 		env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" },
+		maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
 	});
+	if (result.error) {
+		console.error(result.error.message);
+		process.exit(1);
+	}
 	if (result.status !== 0) {
 		process.stderr.write(result.stderr || result.stdout);
 		process.exit(result.status ?? 1);
