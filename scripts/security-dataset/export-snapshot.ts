@@ -4,6 +4,7 @@ import { createWriteStream, type WriteStream } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
+import { artifactInputsFromConvexExportZip } from "./convexExport";
 import { parseConvexJsonMatching } from "./convexOutput";
 import { reserveExportInputs } from "./exportLimit";
 import { buildSecurityDatasetManifest } from "./manifest";
@@ -49,6 +50,7 @@ type Options = {
 	outDir: string;
 	sourceKind: SourceKind | "all";
 	timeWindow: CreatedTimeWindow;
+	convexExportZip: string | null;
 };
 
 type ExportShard = {
@@ -96,9 +98,10 @@ async function main() {
 	const state = createSnapshotState();
 
 	try {
-		const shards = await buildExportShards(options);
-		await exportShards({ options, shards, state, writers });
-		const manifest = buildManifest({ options, snapshotId, state, shardCount: shards.length });
+		const shardCount = options.convexExportZip
+			? await exportConvexExportZip({ options, state, writers })
+			: await exportRemoteShards({ options, state, writers });
+		const manifest = buildManifest({ options, snapshotId, state, shardCount });
 
 		if (options.dryRun) {
 			console.log(JSON.stringify({ snapshotId, dryRun: true, manifest }, null, 2));
@@ -115,6 +118,52 @@ async function main() {
 		if (writers && !writersClosed) await closeSnapshotWriters(writers).catch(() => {});
 		throw error;
 	}
+}
+
+async function exportRemoteShards(input: {
+	options: Options;
+	state: SnapshotState;
+	writers: SnapshotWriters | null;
+}) {
+	const { options, state, writers } = input;
+	const shards = await buildExportShards(options);
+	await exportShards({ options, shards, state, writers });
+	return shards.length;
+}
+
+async function exportConvexExportZip(input: {
+	options: Options;
+	state: SnapshotState;
+	writers: SnapshotWriters | null;
+}) {
+	const { options, state, writers } = input;
+	if (!options.convexExportZip) throw new Error("Missing Convex export ZIP path.");
+	const inputs = await artifactInputsFromConvexExportZip(options.convexExportZip);
+	const reserved = reserveExportInputs(
+		filterExportInputs(inputs, options.sourceKind, options.timeWindow),
+		state,
+		options.limit,
+	);
+	await processArtifactInputs({ inputs: reserved, state, writers });
+	console.error(
+		`[snapshot] convex-export +${reserved.length} artifacts (${state.sourceArtifacts} total)`,
+	);
+	return 0;
+}
+
+function filterExportInputs(
+	inputs: ArtifactExportInput[],
+	sourceKind: SourceKind | "all",
+	timeWindow: CreatedTimeWindow,
+) {
+	return inputs.filter((input) => {
+		if (sourceKind !== "all" && input.sourceKind !== sourceKind) return false;
+		if (timeWindow.createdAtGte !== undefined && input.createdAt < timeWindow.createdAtGte)
+			return false;
+		if (timeWindow.createdAtLt !== undefined && input.createdAt >= timeWindow.createdAtLt)
+			return false;
+		return true;
+	});
 }
 
 async function buildExportShards(options: Options) {
@@ -457,6 +506,7 @@ function parseArgs(args: string[]): Options {
 		outDir: DEFAULT_OUT_DIR,
 		sourceKind: "all",
 		timeWindow: emptyCreatedTimeWindow(),
+		convexExportZip: null,
 	};
 
 	for (let index = 0; index < args.length; index += 1) {
@@ -485,6 +535,8 @@ function parseArgs(args: string[]): Options {
 			options.timeWindow.createdAtGte = parseCreatedTimestamp(readValue(args, ++index, arg), arg);
 		} else if (arg === "--created-before") {
 			options.timeWindow.createdAtLt = parseCreatedTimestamp(readValue(args, ++index, arg), arg);
+		} else if (arg === "--convex-export-zip" || arg === "--from-convex-export") {
+			options.convexExportZip = readValue(args, ++index, arg);
 		} else if (arg === "--mode") {
 			const mode = readValue(args, ++index, arg);
 			if (mode !== "public") throw new Error(`Unsupported mode: ${mode}`);
