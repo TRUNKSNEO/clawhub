@@ -96,6 +96,34 @@ describe("moderationEngine", () => {
     );
   });
 
+  it("flags .env files that ship API tokens and plaintext CGNAT endpoints", () => {
+    const siyuanToken = "sk_siyuan_live_1234567890abcdef";
+    const result = runStaticModerationScan({
+      slug: "siyuan-task-skill",
+      displayName: "SiYuan Task Skill",
+      summary: "Manage SiYuan tasks",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "config.env", size: 128 }],
+      fileContents: [
+        {
+          path: "config.env",
+          content: [
+            "SIYUAN_API_URL=http://100.64.0.11:52487",
+            `SIYUAN_API_TOKEN=${siyuanToken}`,
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.exposed_secret_literal");
+    expect(result.reasonCodes).toContain("suspicious.exposed_resource_identifier");
+    expect(result.status).toBe("suspicious");
+    expect(result.findings.map((finding) => finding.evidence).join("\n")).not.toContain(
+      siyuanToken,
+    );
+  });
+
   it("does not flag placeholder or env-var secret examples", () => {
     const result = runStaticModerationScan({
       slug: "demo",

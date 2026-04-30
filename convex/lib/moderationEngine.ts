@@ -81,7 +81,7 @@ const DESTRUCTIVE_DELETE_PATTERN =
 const SHELL_POSITIONAL_ASSIGNMENT_PATTERN =
   /^\s*([A-Z_][A-Z0-9_]*)=(["']?)\$(?:[1-9][0-9]*|@|\*)\2\s*(?:#.*)?$/gm;
 const SECRET_ASSIGNMENT_PATTERN =
-  /\b(?:[A-Za-z0-9]+[_\s-]+)*(?:(?:api|client|consumer)[_\s-]?(?:secret|key)|secret[_\s-]?key|access[_\s-]?(?:token|key|secret|grant)|auth[_\s-]?token|bearer[_\s-]?token|private[_\s-]?key|service[_\s-]?role[_\s-]?key|github[_\s-]?(?:pat|token)|password)\b\s*[:=]\s*["'`]?([A-Za-z0-9][A-Za-z0-9._~+/=-]{15,})["'`]?/i;
+  /\b(?:[A-Za-z0-9]+[_\s-]+)*(?:(?:api|client|consumer)[_\s-]?(?:secret|key|token)|secret[_\s-]?key|access[_\s-]?(?:token|key|secret|grant)|auth[_\s-]?token|bearer[_\s-]?token|private[_\s-]?key|service[_\s-]?role[_\s-]?key|github[_\s-]?(?:pat|token)|password)\b\s*[:=]\s*["'`]?([A-Za-z0-9][A-Za-z0-9._~+/=-]{15,})["'`]?/i;
 const AUTH_HEADER_SECRET_PATTERN =
   /\b(?:authorization|x-api-key|x-api-secret)\b\s*[:=]\s*(?:Bearer\s+)?["'`]?([A-Za-z0-9][A-Za-z0-9._~+/=-]{15,})["'`]?/i;
 const SHELL_CREDENTIAL_VARIABLE_PATTERN =
@@ -282,6 +282,23 @@ function scanSecretLiteralFile(path: string, content: string, findings: Moderati
     line: secretMatch.line,
     message: "File appears to expose a hardcoded API secret or token.",
     evidence: secretMatch.text,
+  });
+}
+
+function scanPlaintextCgnatEndpointFile(
+  path: string,
+  content: string,
+  findings: ModerationFinding[],
+) {
+  if (!CGNAT_HTTP_URL_PATTERN.test(content)) return;
+  const match = findFirstLine(content, CGNAT_HTTP_URL_PATTERN);
+  addFinding(findings, {
+    code: REASON_CODES.EXPOSED_RESOURCE_IDENTIFIER,
+    severity: "critical",
+    file: path,
+    line: match.line,
+    message: "Plaintext HTTP endpoint targets a CGNAT/Tailscale-range address.",
+    evidence: match.text,
   });
 }
 
@@ -682,18 +699,6 @@ function scanCodeFile(
     });
   }
 
-  if (CGNAT_HTTP_URL_PATTERN.test(content)) {
-    const match = findFirstLine(content, CGNAT_HTTP_URL_PATTERN);
-    addFinding(findings, {
-      code: REASON_CODES.EXPOSED_RESOURCE_IDENTIFIER,
-      severity: "critical",
-      file: path,
-      line: match.line,
-      message: "Plaintext HTTP endpoint targets a CGNAT/Tailscale-range address.",
-      evidence: match.text,
-    });
-  }
-
   const wsMatch = content.match(/new\s+WebSocket\s*\(\s*["']wss?:\/\/[^"']*:(\d+)/);
   if (wsMatch) {
     const port = Number.parseInt(wsMatch[1] ?? "", 10);
@@ -1039,6 +1044,7 @@ export function runStaticModerationScan(input: StaticScanInput): StaticScanResul
 
   for (const file of files) {
     scanSecretLiteralFile(file.path, file.content, findings);
+    scanPlaintextCgnatEndpointFile(file.path, file.content, findings);
     scanCodeFile(file.path, file.content, findings, declaredEnvNames);
     scanMarkdownFile(file.path, file.content, findings);
     scanManifestFile(file.path, file.content, findings);
