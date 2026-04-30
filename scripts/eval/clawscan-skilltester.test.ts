@@ -74,6 +74,8 @@ describe("clawscan skilltester eval", () => {
       "2",
       "--concurrency",
       "3",
+      "--hf-split",
+      "eval_holdout",
       "--target",
       "openclaw/demo-skill@1.0.0",
       "--mock",
@@ -84,6 +86,7 @@ describe("clawscan skilltester eval", () => {
     expect(parsed.cacheDir).toBe("/tmp/clawscan-cache");
     expect(parsed.limit).toBe(2);
     expect(parsed.concurrency).toBe(3);
+    expect(parsed.hfSplit).toBe("eval_holdout");
     expect(parsed.targets).toEqual(["openclaw/demo-skill@1.0.0"]);
     expect(parsed.mock).toBe(true);
   });
@@ -98,6 +101,7 @@ describe("clawscan skilltester eval", () => {
       expect(parsed.corpusFile).toBeNull();
       expect(parsed.hfDataset).toBe("example/private-dataset");
       expect(parsed.hfConfig).toBe("default");
+      expect(parsed.hfSplit).toBe("eval_holdout");
     } finally {
       if (previous === undefined) {
         delete process.env.CLAWHUB_SECURITY_EVAL_HF_DATASET;
@@ -172,6 +176,7 @@ describe("clawscan skilltester eval", () => {
       corpusFile: "/unused/corpus.jsonl",
       hfDataset: "example/private-dataset",
       hfConfig: "default",
+      hfSplit: "eval_holdout",
       outputDir: "/unused/results",
       cacheDir: "/unused/cache",
       model: "gpt-5.5",

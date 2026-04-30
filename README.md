@@ -75,14 +75,14 @@ benchmarks load the private Hugging Face dataset named by `CLAWHUB_SECURITY_EVAL
 run against the `eval_holdout` split:
 
 ```bash
-bun run eval:clawscan:skilltester -- --mock --limit 2
+bun run eval:clawscan:skilltester -- --hf-split eval_holdout --mock --limit 2
 ```
 
 The default private dataset fetch requires `CLAWHUB_SECURITY_EVAL_HF_DATASET` plus `HF_TOKEN`,
 `HUGGINGFACE_TOKEN`, or `HUGGING_FACE_HUB_TOKEN`; live model runs also require `OPENAI_API_KEY`.
 Use `--corpus <path>` to run against a local corpus JSONL instead. Useful flags include
-`--output-dir`, `--cache-dir`, `--limit`, `--concurrency`, `--target`, `--risky-only`, `--model`,
-`--reasoning-effort`, and `--service-tier`.
+`--hf-split`, `--output-dir`, `--cache-dir`, `--limit`, `--concurrency`, `--target`,
+`--risky-only`, `--model`, `--reasoning-effort`, and `--service-tier`.
 
 ### Removal permissions
 

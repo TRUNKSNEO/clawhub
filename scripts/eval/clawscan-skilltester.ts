@@ -32,6 +32,7 @@ import {
 const HF_DATASET_ENV_VAR = "CLAWHUB_SECURITY_EVAL_HF_DATASET";
 const DEFAULT_HF_CONFIG = "default";
 const DEFAULT_HF_SPLIT = "eval_holdout";
+const HF_SPLITS = new Set(["train", "validation", "test", "eval_holdout"]);
 const DEFAULT_OUTPUT_DIR = "eval/results/clawscan-skilltester";
 const DEFAULT_CACHE_DIR = "eval/cache/clawscan-skilltester";
 const DEFAULT_CONCURRENCY = 1;
@@ -327,6 +328,7 @@ export type RunComparisonOptions = {
   corpusFile: string | null;
   hfDataset: string | null;
   hfConfig: string;
+  hfSplit: string;
   outputDir: string;
   cacheDir: string;
   model: string;
@@ -368,6 +370,11 @@ function parseReasoningEffort(value: string): LlmEvalReasoningEffort {
   throw new Error(
     `--reasoning-effort must be one of ${Array.from(CLI_REASONING_EFFORTS).join(", ")}`,
   );
+}
+
+function parseHfSplit(value: string) {
+  if (HF_SPLITS.has(value)) return value;
+  throw new Error(`--hf-split must be one of ${Array.from(HF_SPLITS).join(", ")}`);
 }
 
 function parseServiceTier(value: string): LlmEvalServiceTier {
@@ -587,7 +594,11 @@ function securityScoreForHfRow(row: HfEvalHoldoutRow, label: NormalizedVerdict) 
   }
 }
 
-export function corpusRowFromHfEvalHoldoutRow(row: HfEvalHoldoutRow, index = 0): CorpusRow {
+export function corpusRowFromHfEvalHoldoutRow(
+  row: HfEvalHoldoutRow,
+  index = 0,
+  split = DEFAULT_HF_SPLIT,
+): CorpusRow {
   const source = row.metadata?.source ?? {};
   const label = normalizedHfLabel(row);
   const securityLevel = securityLevelForHfLabel(label);
@@ -634,7 +645,7 @@ export function corpusRowFromHfEvalHoldoutRow(row: HfEvalHoldoutRow, index = 0):
         score: securityScore,
       },
       source_urls: {
-        detail_api_url: `hf://${DEFAULT_HF_SPLIT}/${index}`,
+        detail_api_url: `hf://${split}/${index}`,
         skill_url: slug ? `https://clawhub.ai/${slug}` : undefined,
       },
       timestamps: {
@@ -657,13 +668,14 @@ function hfAuthToken() {
 async function fetchHfEvalHoldoutRows(options: {
   dataset: string;
   config: string;
+  split: string;
   limit?: number;
   fetchAll: boolean;
 }): Promise<CorpusRow[]> {
   const token = hfAuthToken();
   if (!token) {
     throw new Error(
-      `HF_TOKEN, HUGGINGFACE_TOKEN, or HUGGING_FACE_HUB_TOKEN is required to load private dataset ${options.dataset} split ${DEFAULT_HF_SPLIT}. Pass --corpus <path> to use a local corpus instead.`,
+      `HF_TOKEN, HUGGINGFACE_TOKEN, or HUGGING_FACE_HUB_TOKEN is required to load private dataset ${options.dataset} split ${options.split}. Pass --corpus <path> to use a local corpus instead.`,
     );
   }
 
@@ -679,7 +691,7 @@ async function fetchHfEvalHoldoutRows(options: {
     const url = new URL("https://datasets-server.huggingface.co/rows");
     url.searchParams.set("dataset", options.dataset);
     url.searchParams.set("config", options.config);
-    url.searchParams.set("split", DEFAULT_HF_SPLIT);
+    url.searchParams.set("split", options.split);
     url.searchParams.set("offset", String(offset));
     url.searchParams.set("length", String(length));
 
@@ -691,7 +703,7 @@ async function fetchHfEvalHoldoutRows(options: {
     const body = (await response.json().catch(() => ({}))) as HfDatasetRowsResponse;
     if (!response.ok) {
       throw new Error(
-        `Failed to load HF dataset ${options.dataset}/${DEFAULT_HF_SPLIT}: ${
+        `Failed to load HF dataset ${options.dataset}/${options.split}: ${
           body.error ?? response.statusText
         }`,
       );
@@ -701,7 +713,7 @@ async function fetchHfEvalHoldoutRows(options: {
     total = body.num_rows_total ?? offset + pageRows.length;
     rows.push(
       ...pageRows.map((entry, index) =>
-        corpusRowFromHfEvalHoldoutRow(entry.row as HfEvalHoldoutRow, offset + index),
+        corpusRowFromHfEvalHoldoutRow(entry.row as HfEvalHoldoutRow, offset + index, options.split),
       ),
     );
     offset += pageRows.length;
@@ -731,12 +743,13 @@ async function loadRows(
   const rows = await fetchHfEvalHoldoutRows({
     dataset: options.hfDataset,
     config: options.hfConfig,
+    split: options.hfSplit,
     limit: options.limit,
     fetchAll,
   });
   return {
     rows,
-    source: `hf://${options.hfDataset}/${options.hfConfig}/${DEFAULT_HF_SPLIT}`,
+    source: `hf://${options.hfDataset}/${options.hfConfig}/${options.hfSplit}`,
   };
 }
 
@@ -1723,6 +1736,7 @@ Options:
   --corpus <path>       Local SkillTester corpus JSONL path. When omitted, loads HF ${HF_DATASET_ENV_VAR}/${DEFAULT_HF_SPLIT}.
   --hf-dataset <id>     Hugging Face dataset id (default: ${HF_DATASET_ENV_VAR})
   --hf-config <name>    Hugging Face dataset config (default: ${DEFAULT_HF_CONFIG})
+  --hf-split <name>     Hugging Face split: train, validation, test, or eval_holdout (default: ${DEFAULT_HF_SPLIT})
   --output-dir <path>   Report output directory (default: ${DEFAULT_OUTPUT_DIR})
   --cache-dir <path>    Prompt response cache directory (default: ${DEFAULT_CACHE_DIR})
   --limit <n>           Evaluate only the first n corpus rows
@@ -1747,6 +1761,7 @@ export function parseArgs(argv: string[]): CliOptions {
     corpusFile: null,
     hfDataset: process.env[HF_DATASET_ENV_VAR] ?? null,
     hfConfig: DEFAULT_HF_CONFIG,
+    hfSplit: DEFAULT_HF_SPLIT,
     outputDir: DEFAULT_OUTPUT_DIR,
     cacheDir: DEFAULT_CACHE_DIR,
     model: getLlmEvalModel(),
@@ -1777,6 +1792,12 @@ export function parseArgs(argv: string[]): CliOptions {
       case "--hf-config":
         if (!next) throw new Error("--hf-config requires a config name");
         options.hfConfig = next;
+        i += 1;
+        break;
+      case "--hf-split":
+      case "--split":
+        if (!next) throw new Error(`${arg} requires a split name`);
+        options.hfSplit = parseHfSplit(next);
         i += 1;
         break;
       case "--output-dir":
