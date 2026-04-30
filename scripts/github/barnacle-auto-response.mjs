@@ -56,7 +56,7 @@ export const managedLabelSpecs = {
   },
   [RESCAN_GUIDANCE_LABEL]: {
     color: "BFDADC",
-    description: "Auto-close: rescan/review requests should use owner rescan flow.",
+    description: "Guides owners to the ClawHub rescan flow for review requests.",
   },
   "r: too-many-prs": {
     color: "D93F0B",
