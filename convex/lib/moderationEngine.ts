@@ -153,6 +153,12 @@ const OAUTH_CLIENT_SECRET_FLOW_PATTERN =
 const LIGHTNING_BILLING_FLOW_PATTERN =
   /\b(?:billing\/agent\/(?:create|check)-invoice|amount_sats|LNURL|Lightning|PAYG)\b/i;
 const OUTBOUND_POST_PATTERN = /\b(?:curl\s+-X\s+POST|requests\.post\s*\(|fetch\s*\()/i;
+const REMOTE_RECIPE_FETCH_PATTERN =
+  /\b(?:curl|requests\.get|fetch)\b[\s\S]{0,600}(?:error-codes\.json|recipes?\.json|patterns\.json|docs\.openclaw\.ai)|ERROR_CODES_URL\s*=/i;
+const MUTABLE_RECIPE_STORE_PATTERN =
+  /\b(?:error-patterns\.json|recipes?\.json|safe_auto|fix_recipe_id|["']command["'])\b/i;
+const TEMPLATED_SUBPROCESS_EXECUTION_PATTERN =
+  /\bsubstitute_params\s*\([\s\S]{0,500}\b(?:shlex\.split|subprocess\.run)\b|\b(?:shlex\.split|subprocess\.run)\b[\s\S]{0,500}\bsubstitute_params\s*\(/i;
 
 function hasMaliciousInstallPrompt(content: string) {
   const hasTerminalInstruction =
@@ -515,6 +521,26 @@ function findAutonomousCredentialEgress(files: TextFile[]) {
   for (const file of files) {
     if (!AUTONOMOUS_ANSWER_EGRESS_PATTERN.test(file.content)) continue;
     const match = findFirstLine(file.content, AUTONOMOUS_ANSWER_EGRESS_PATTERN);
+    return { file: file.path, line: match.line, text: match.text };
+  }
+
+  const fallback = files[0];
+  if (!fallback) return null;
+  return { file: fallback.path, line: 1, text: fallback.content.split("\n")[0] ?? "" };
+}
+
+function findRemoteRecipeExecution(files: TextFile[]) {
+  const packageText = files.map((file) => file.content).join("\n");
+  if (!REMOTE_RECIPE_FETCH_PATTERN.test(packageText)) return null;
+  if (!MUTABLE_RECIPE_STORE_PATTERN.test(packageText)) return null;
+  if (!TEMPLATED_SUBPROCESS_EXECUTION_PATTERN.test(packageText)) return null;
+
+  for (const file of files) {
+    if (!TEMPLATED_SUBPROCESS_EXECUTION_PATTERN.test(file.content)) continue;
+    const match = findFirstLine(
+      file.content,
+      /substitute_params\s*\(|shlex\.split|subprocess\.run/,
+    );
     return { file: file.path, line: match.line, text: match.text };
   }
 
@@ -1089,6 +1115,18 @@ export function runStaticModerationScan(input: StaticScanInput): StaticScanResul
       message:
         "Autonomous schedule or loop submits credential-bearing agent output without per-call consent.",
       evidence: autonomousCredentialEgress.text,
+    });
+  }
+
+  const remoteRecipeExecution = findRemoteRecipeExecution(files);
+  if (remoteRecipeExecution) {
+    addFinding(findings, {
+      code: REASON_CODES.REMOTE_RECIPE_EXECUTION,
+      severity: "critical",
+      file: remoteRecipeExecution.file,
+      line: remoteRecipeExecution.line,
+      message: "Remote recipe/catalog data can influence templated subprocess command execution.",
+      evidence: remoteRecipeExecution.text,
     });
   }
 

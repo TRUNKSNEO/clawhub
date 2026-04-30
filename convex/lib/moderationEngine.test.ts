@@ -891,6 +891,71 @@ describe("moderationEngine", () => {
     expect(result.status).toBe("clean");
   });
 
+  it("flags remote recipe catalogs that feed templated subprocess execution", () => {
+    const result = runStaticModerationScan({
+      slug: "openclaw-whisperer",
+      displayName: "OpenClaw Whisperer",
+      summary: "Auto-fix OpenClaw errors",
+      frontmatter: {},
+      metadata: {},
+      files: [
+        { path: "scripts/lib/doc_fetcher.py", size: 512 },
+        { path: "scripts/lib/fix_step_executor.py", size: 512 },
+        { path: "data/error-patterns.json", size: 256 },
+      ],
+      fileContents: [
+        {
+          path: "scripts/lib/doc_fetcher.py",
+          content: [
+            'ERROR_CODES_URL = "https://docs.openclaw.ai/api/error-codes.json"',
+            'subprocess.run(["curl", "-s", ERROR_CODES_URL], capture_output=True)',
+            'patterns_path.write_text(json.dumps(remote_payload["recipes"]))',
+          ].join("\n"),
+        },
+        {
+          path: "scripts/lib/fix_step_executor.py",
+          content: [
+            "def _execute_command_step(step, params):",
+            '    cmd = substitute_params(step["command"], params)',
+            "    return subprocess.run(shlex.split(cmd), check=False)",
+          ].join("\n"),
+        },
+        {
+          path: "data/error-patterns.json",
+          content:
+            '{"fix_recipe_id":"kill-port","safe_auto":true,"command":"lsof -ti :{port} | xargs kill -9"}',
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.remote_recipe_execution");
+    expect(result.status).toBe("suspicious");
+  });
+
+  it("does not flag remote docs fetches without subprocess recipes", () => {
+    const result = runStaticModerationScan({
+      slug: "docs-helper",
+      displayName: "Docs Helper",
+      summary: "Fetch docs metadata",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "scripts/doc_fetcher.py", size: 256 }],
+      fileContents: [
+        {
+          path: "scripts/doc_fetcher.py",
+          content: [
+            'ERROR_CODES_URL = "https://docs.openclaw.ai/api/error-codes.json"',
+            "payload = requests.get(ERROR_CODES_URL, timeout=10).json()",
+            "print(payload.get('title', ''))",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).not.toContain("suspicious.remote_recipe_execution");
+    expect(result.status).toBe("clean");
+  });
+
   it("flags hardcoded operator endpoints that bind OAuth credentials to Lightning billing", () => {
     const result = runStaticModerationScan({
       slug: "hodlxxi-bitcoin-identity",
