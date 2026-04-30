@@ -498,6 +498,46 @@ describe("moderationEngine", () => {
     expect(result.status).toBe("clean");
   });
 
+  it("flags plaintext CGNAT HTTP endpoints", () => {
+    const result = runStaticModerationScan({
+      slug: "farmos-weather",
+      displayName: "FarmOS Weather",
+      summary: "Fetch farm weather data",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "src/api.ts", size: 256 }],
+      fileContents: [
+        {
+          path: "src/api.ts",
+          content: 'const station = "http://100.76.12.9:8080/weather/current";',
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.exposed_resource_identifier");
+    expect(result.status).toBe("suspicious");
+  });
+
+  it("does not flag local development HTTP endpoints", () => {
+    const result = runStaticModerationScan({
+      slug: "local-api",
+      displayName: "Local API",
+      summary: "Fetch local dev data",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "src/api.ts", size: 128 }],
+      fileContents: [
+        {
+          path: "src/api.ts",
+          content: 'const station = "http://127.0.0.1:8080/weather/current";',
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).not.toContain("suspicious.exposed_resource_identifier");
+    expect(result.status).toBe("clean");
+  });
+
   it("does not flag declared env vars sent to the intended API", () => {
     const result = runStaticModerationScan({
       slug: "todoist",

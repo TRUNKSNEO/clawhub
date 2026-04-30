@@ -65,6 +65,8 @@ const MARKDOWN_EXTENSION = /\.(md|markdown|mdx)$/i;
 const CODE_EXTENSION = /\.(js|ts|mjs|cjs|mts|cts|jsx|tsx|py|sh|bash|zsh|rb|go)$/i;
 const STANDARD_PORTS = new Set([80, 443, 8080, 8443, 3000]);
 const RAW_IP_URL_PATTERN = /https?:\/\/\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/|["'])/i;
+const CGNAT_HTTP_URL_PATTERN =
+  /http:\/\/100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}(?::\d+)?(?:\/[^\s"'`]*)?/i;
 const INSTALL_PACKAGE_PATTERN = /installer-package\s*:\s*https?:\/\/[^\s"'`]+/i;
 const GENERATED_SOURCE_PLACEHOLDER_PATTERN =
   /^\s*[A-Za-z_][A-Za-z0-9_]*\s*=.*["']\$\{[A-Za-z_][A-Za-z0-9_-]*\}["']/m;
@@ -623,6 +625,18 @@ function scanCodeFile(
       file: path,
       line: match.line,
       message: "Possible crypto mining behavior detected.",
+      evidence: match.text,
+    });
+  }
+
+  if (CGNAT_HTTP_URL_PATTERN.test(content)) {
+    const match = findFirstLine(content, CGNAT_HTTP_URL_PATTERN);
+    addFinding(findings, {
+      code: REASON_CODES.EXPOSED_RESOURCE_IDENTIFIER,
+      severity: "critical",
+      file: path,
+      line: match.line,
+      message: "Plaintext HTTP endpoint targets a CGNAT/Tailscale-range address.",
       evidence: match.text,
     });
   }
