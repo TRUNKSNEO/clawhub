@@ -5,11 +5,7 @@ import type { ActionCtx } from "../_generated/server";
 import { getOptionalApiTokenUserId, requireApiTokenUser } from "../lib/apiTokenAuth";
 import { applyRateLimit, parseBearerToken } from "../lib/httpRateLimit";
 import { parseBooleanQueryParam, resolveBooleanQueryParam } from "../lib/httpUtils";
-import type {
-  LlmAgenticRiskFinding,
-  LlmEvalDimension,
-  LlmRiskSummary,
-} from "../lib/securityPrompt";
+import type { LlmEvalDimension } from "../lib/securityPrompt";
 import { publishVersionForUser } from "../skills";
 import {
   MAX_RAW_FILE_BYTES,
@@ -229,8 +225,6 @@ type SkillSecuritySnapshot = {
       dimensions: LlmEvalDimension[] | null;
       guidance: string | null;
       findings: string | null;
-      agenticRiskFindings: LlmAgenticRiskFinding[] | null;
-      riskSummary: LlmRiskSummary | null;
       model: string | null;
       checkedAt: number | null;
     } | null;
@@ -378,8 +372,6 @@ function buildSkillSecuritySnapshot(
             dimensions: llm.dimensions ?? null,
             guidance: llm.guidance ?? null,
             findings: llm.findings ?? null,
-            agenticRiskFindings: llm.agenticRiskFindings ?? null,
-            riskSummary: llm.riskSummary ?? null,
             model: llm.model ?? null,
             checkedAt: llm.checkedAt ?? null,
           }
