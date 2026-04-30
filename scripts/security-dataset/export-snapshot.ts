@@ -204,8 +204,11 @@ async function exportShard(input: {
 }) {
 	const { options, shard, state, writers } = input;
 	let cursor: string | null = null;
+	let batchPages = options.batchPages;
 	while (!isLimitReached(options, state)) {
-		const page = await runConvexPage(options, shard, cursor, options.pageSize);
+		const result = await runConvexPage(options, shard, cursor, options.pageSize, batchPages);
+		batchPages = result.batchPages;
+		const page = result.page;
 		const inputs = reserveExportInputs(page.page, state, options.limit);
 		if (inputs.length > 0) {
 			await processArtifactInputs({ inputs, state, writers });
@@ -223,22 +226,54 @@ async function runConvexPage(
 	shard: ExportShard,
 	cursor: string | null,
 	numItems: number,
-): Promise<ConvexPage> {
-	const args = {
-		sourceKind: shard.sourceKind,
-		mode: options.mode,
-		createdAtGte: shard.createdAtGte,
-		createdAtLt: shard.createdAtLt,
-		paginationOpts: { cursor, numItems },
-		pageCount: options.batchPages,
-	};
-	const compressed = await runConvexJson<CompressedConvexPage>(
-		options,
-		"securityDatasetNode:listArtifactExportBatchCompressedInternal",
-		args,
-		isCompressedConvexPage,
-	);
-	return decodeCompressedConvexPage(compressed);
+	batchPages: number,
+): Promise<{ page: ConvexPage; batchPages: number }> {
+	const functionName = "securityDatasetNode:listArtifactExportBatchCompressedInternal";
+	let pageCount = batchPages;
+
+	while (true) {
+		const args = {
+			sourceKind: shard.sourceKind,
+			mode: options.mode,
+			createdAtGte: shard.createdAtGte,
+			createdAtLt: shard.createdAtLt,
+			paginationOpts: { cursor, numItems },
+			pageCount,
+		};
+
+		let lastError: unknown = null;
+		for (let attempt = 1; attempt <= DEFAULT_MAX_CONVEX_ATTEMPTS; attempt += 1) {
+			try {
+				const compressed = await runConvexJsonOnce<CompressedConvexPage>(
+					options,
+					functionName,
+					args,
+					isCompressedConvexPage,
+				);
+				return { page: decodeCompressedConvexPage(compressed), batchPages: pageCount };
+			} catch (error) {
+				lastError = error;
+				if (isLikelyTruncatedConvexOutput(error) && pageCount > 1) break;
+				if (attempt === DEFAULT_MAX_CONVEX_ATTEMPTS) break;
+				console.error(
+					`[snapshot] retrying ${functionName} batch-pages=${pageCount} after attempt ${attempt}: ${errorMessage(error)}`,
+				);
+				await delay(attempt * 500);
+			}
+		}
+
+		if (isLikelyTruncatedConvexOutput(lastError) && pageCount > 1) {
+			const nextPageCount = Math.max(1, Math.floor(pageCount / 2));
+			console.error(
+				`[snapshot] ${shard.label} reducing batch-pages ${pageCount}->${nextPageCount}: ${errorMessage(lastError)}`,
+			);
+			pageCount = nextPageCount;
+			continue;
+		}
+
+		writeCommandErrorOutput(lastError);
+		throw lastError;
+	}
 }
 
 async function runConvexBounds(options: Options, sourceKind: SourceKind): Promise<ConvexBounds> {
@@ -256,22 +291,10 @@ async function runConvexJson<T>(
 	args: unknown,
 	validate: (value: unknown) => value is T,
 ): Promise<T> {
-	const commandArgs = buildConvexRunArgs(options, functionName, args);
 	let lastError: unknown = null;
 	for (let attempt = 1; attempt <= DEFAULT_MAX_CONVEX_ATTEMPTS; attempt += 1) {
 		try {
-			const result = await execFileAsync("bunx", commandArgs, {
-				cwd: process.cwd(),
-				encoding: "utf8",
-				env: convexRunEnv(),
-				maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
-			});
-			try {
-				return parseConvexJsonMatching(result.stdout, validate);
-			} catch (parseError) {
-				await writeDebugConvexOutput(functionName, result.stdout);
-				throw parseError;
-			}
+			return await runConvexJsonOnce(options, functionName, args, validate);
 		} catch (error) {
 			lastError = error;
 			if (attempt === DEFAULT_MAX_CONVEX_ATTEMPTS) break;
@@ -284,6 +307,27 @@ async function runConvexJson<T>(
 
 	writeCommandErrorOutput(lastError);
 	throw lastError;
+}
+
+async function runConvexJsonOnce<T>(
+	options: Options,
+	functionName: string,
+	args: unknown,
+	validate: (value: unknown) => value is T,
+): Promise<T> {
+	const commandArgs = buildConvexRunArgs(options, functionName, args);
+	const result = await execFileAsync("bunx", commandArgs, {
+		cwd: process.cwd(),
+		encoding: "utf8",
+		env: convexRunEnv(),
+		maxBuffer: CONVEX_RUN_MAX_BUFFER_BYTES,
+	});
+	try {
+		return parseConvexJsonMatching(result.stdout, validate);
+	} catch (parseError) {
+		await writeDebugConvexOutput(functionName, result.stdout);
+		throw parseError;
+	}
 }
 
 function convexRunEnv() {
@@ -511,6 +555,10 @@ function delay(ms: number) {
 
 function errorMessage(error: unknown) {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function isLikelyTruncatedConvexOutput(error: unknown) {
+	return /Convex JSON output \(524288 bytes\)/.test(errorMessage(error));
 }
 
 function writeCommandErrorOutput(error: unknown) {
