@@ -107,6 +107,8 @@ const SECRET_FLAG_ARGV_PATTERN =
   /\b(?:npx|bunx|pnpm\s+dlx|npm\s+exec|node|python3?|uvx|docker\s+run)\b[^\n]{0,240}--(?:private-key|seed|seed-phrase|mnemonic|password|token)\s+(?:"[^"\n]{8,}"|'[^'\n]{8,}'|<[^>\n]{4,}>|\$[A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|MNEMONIC|SEED|PHRASE)[A-Z0-9_]*)/i;
 const SECRET_ARGV_REDACTION_PATTERN =
   /(\b(?:from-mnemonic|--(?:private-key|seed|seed-phrase|mnemonic|password|token))\s+)(["'`])([^"'`]{8,})\2/gi;
+const DYNAMIC_CODE_EXECUTION_PATTERN =
+  /\beval\s*\(|new\s+Function\s*\(|\b(?:[A-Za-z_][A-Za-z0-9_]*\.)?loader\.exec_module\s*\(/;
 
 function hasMaliciousInstallPrompt(content: string) {
   const hasTerminalInstruction =
@@ -515,8 +517,8 @@ function scanCodeFile(
     });
   }
 
-  if (/\beval\s*\(|new\s+Function\s*\(/.test(content)) {
-    const match = findFirstLine(content, /\beval\s*\(|new\s+Function\s*\(/);
+  if (DYNAMIC_CODE_EXECUTION_PATTERN.test(content)) {
+    const match = findFirstLine(content, DYNAMIC_CODE_EXECUTION_PATTERN);
     addFinding(findings, {
       code: REASON_CODES.DYNAMIC_CODE,
       severity: "critical",

@@ -274,6 +274,31 @@ describe("moderationEngine", () => {
     expect(result.status).toBe("suspicious");
   });
 
+  it("flags Python importlib module execution as dynamic code", () => {
+    const result = runStaticModerationScan({
+      slug: "ztp",
+      displayName: "Zero Trust Protocol",
+      summary: "Audit Python files",
+      frontmatter: {},
+      metadata: {},
+      files: [{ path: "scripts/shield_pro.py", size: 256 }],
+      fileContents: [
+        {
+          path: "scripts/shield_pro.py",
+          content: [
+            "import importlib.util",
+            'spec = importlib.util.spec_from_file_location("target", target_path)',
+            "module = importlib.util.module_from_spec(spec)",
+            "spec.loader.exec_module(module)",
+          ].join("\n"),
+        },
+      ],
+    });
+
+    expect(result.reasonCodes).toContain("suspicious.dynamic_code_execution");
+    expect(result.status).toBe("suspicious");
+  });
+
   it("flags shell-capable child process calls", () => {
     const result = runStaticModerationScan({
       slug: "demo",
