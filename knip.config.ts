@@ -72,10 +72,9 @@ const config = {
         "scripts/build.mjs!",
         "src/cli.ts!",
         "src/http.ts!",
+        "src/schema/**/*.ts!",
         "vitest*.ts!",
-        ...(includeTests
-          ? ["src/**/*.test.ts!", "test/**/*.ts!", "test-artifact/**/*.ts!"]
-          : []),
+        ...(includeTests ? ["src/**/*.test.ts!", "test/**/*.ts!", "test-artifact/**/*.ts!"] : []),
       ],
       project: [
         "bin/**/*.js!",
