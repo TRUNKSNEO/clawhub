@@ -29,6 +29,9 @@ jobs:
       - name: Audit dependencies
         run: bun audit
 
+      - name: Format
+        run: bun run format:check
+
       - name: Lint
         run: bun run lint
 
