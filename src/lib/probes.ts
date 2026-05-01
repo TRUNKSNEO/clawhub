@@ -1,6 +1,6 @@
-type ProbeName = "healthz" | "readyz";
+export type ProbeName = "healthz" | "readyz";
 
-type ProbePayload = {
+export type ProbePayload = {
   ok: true;
   status: "ok";
   service: "clawhub";
