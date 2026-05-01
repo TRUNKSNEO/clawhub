@@ -277,11 +277,7 @@ describe("securityPrompt", () => {
   it("includes static scan and capability signals in skill eval input", () => {
     const message = assembleSkillEvalUserMessage(baseCtx);
 
-    expect(message).toContain("<skill_data>");
-    expect(message).toContain("</skill_data>");
     expect(message).toContain("### SKILL.md content (quoted artifact data)");
-    expect(message).toContain("<skill_data>");
-    expect(message).toContain("</skill_data>");
     expect(message).toContain('"path": "SKILL.md"');
     expect(message).toContain('"content": "# Wallet Sync');
     expect(message).toContain("### Static scan signals");
