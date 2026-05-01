@@ -7158,6 +7158,63 @@ export const setSkillSoftDeletedInternal = internalMutation({
   },
 });
 
+export const hideSkillForSecurityRedactionInternal = internalMutation({
+  args: {
+    actorUserId: v.id("users"),
+    slug: v.string(),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const actor = await ctx.db.get(args.actorUserId);
+    if (!actor || actor.deletedAt || actor.deactivatedAt) throw new Error("Actor not found");
+
+    const slug = args.slug.trim().toLowerCase();
+    if (!slug) throw new Error("Slug required");
+
+    const skill = await ctx.db
+      .query("skills")
+      .withIndex("by_slug", (q) => q.eq("slug", slug))
+      .unique();
+    if (!skill) throw new Error("Skill not found");
+    if (skill.softDeletedAt) return { ok: true as const, changed: false as const };
+
+    const now = Date.now();
+    const note = trimManualOverrideNote(args.reason);
+    if (!note) throw new Error("Reason required");
+
+    const patch: Partial<Doc<"skills">> = {
+      softDeletedAt: now,
+      moderationStatus: "hidden",
+      moderationReason: "security.redaction",
+      moderationNotes: note,
+      hiddenAt: now,
+      hiddenBy: actor._id,
+      lastReviewedAt: now,
+      updatedAt: now,
+    };
+    const nextSkill = { ...skill, ...patch };
+    await ctx.db.patch(skill._id, patch);
+    await adjustGlobalPublicCountForSkillChange(ctx, skill, nextSkill);
+    await adjustUserSkillStatsForSkillChange(ctx, skill, nextSkill);
+    await setSkillEmbeddingsSoftDeleted(ctx, skill._id, true, now);
+
+    await ctx.db.insert("auditLogs", {
+      actorUserId: actor._id,
+      action: "skill.delete.security_redaction",
+      targetType: "skill",
+      targetId: skill._id,
+      metadata: {
+        slug,
+        softDeletedAt: now,
+        reason: note,
+      },
+      createdAt: now,
+    });
+
+    return { ok: true as const, changed: true as const };
+  },
+});
+
 function clampInt(value: number, min: number, max: number) {
   const rounded = Number.isFinite(value) ? Math.round(value) : min;
   return Math.min(max, Math.max(min, rounded));
