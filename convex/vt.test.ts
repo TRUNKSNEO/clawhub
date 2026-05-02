@@ -298,6 +298,110 @@ describe("package VT retries", () => {
     });
   });
 
+  it("uploads the exact ClawPack tarball for package scans", async () => {
+    process.env.VT_API_KEY = "test-key";
+    const clawpackBytes = new TextEncoder().encode("exact clawpack tgz bytes");
+    const clawpackSha256 = await __test.sha256Hex(clawpackBytes);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response("", { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: "analysis-clawpack" } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const runMutation = vi.fn(async () => null);
+    const scheduler = { runAfter: vi.fn(async () => null) };
+    await scanPackageReleaseWithVirusTotalHandler(
+      {
+        runQuery: vi
+          .fn()
+          .mockResolvedValueOnce({
+            _id: "packageReleases:demo",
+            packageId: "packages:demo",
+            version: "1.2.3",
+            artifactKind: "npm-pack",
+            clawpackStorageId: "storage:clawpack",
+            npmTarballName: "demo-plugin-1.2.3.tgz",
+            files: [
+              { path: "package.json", storageId: "storage:pkg" },
+              { path: "openclaw.plugin.json", storageId: "storage:plugin" },
+            ],
+          })
+          .mockResolvedValueOnce({
+            _id: "packages:demo",
+            name: "demo-plugin",
+            family: "code-plugin",
+            isOfficial: true,
+          }),
+        runMutation,
+        scheduler,
+        storage: {
+          get: vi.fn(async (storageId) => {
+            if (storageId === "storage:clawpack") {
+              return new Blob([clawpackBytes], { type: "application/gzip" });
+            }
+            return null;
+          }),
+        },
+      } as never,
+      { releaseId: "packageReleases:demo" },
+    );
+
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        releaseId: "packageReleases:demo",
+        sha256hash: clawpackSha256,
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      `https://www.virustotal.com/api/v3/files/${clawpackSha256}`,
+      expect.objectContaining({ method: "GET" }),
+    );
+    const uploadOptions = fetchMock.mock.calls[1]?.[1] as { body?: FormData } | undefined;
+    const uploadedFile = uploadOptions?.body?.get("file") as File | null;
+    expect(uploadedFile?.name).toBe("demo-plugin-1.2.3.tgz");
+    expect(await uploadedFile?.text()).toBe("exact clawpack tgz bytes");
+    expect(scheduler.runAfter).toHaveBeenCalledWith(5 * 60 * 1000, expect.anything(), {
+      releaseId: "packageReleases:demo",
+      attempt: 1,
+    });
+  });
+
+  it("uses VirusTotal large-file upload URLs above the direct upload limit", async () => {
+    process.env.VT_API_KEY = "test-key";
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: "https://upload.example.test/vt" }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { id: "analysis-large" } }), { status: 200 }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await __test.uploadFileToVirusTotal(
+      "test-key",
+      new Uint8Array(__test.VIRUSTOTAL_DIRECT_UPLOAD_LIMIT_BYTES + 1),
+      "large.tgz",
+      "application/gzip",
+    );
+
+    expect(response.ok).toBe(true);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "https://www.virustotal.com/api/v3/files/upload_url",
+      expect.objectContaining({ method: "GET" }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "https://upload.example.test/vt",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
   it("uses existing AV engine verdicts for packages without re-uploading", async () => {
     process.env.VT_API_KEY = "test-key";
     const fetchMock = vi.fn().mockResolvedValueOnce({

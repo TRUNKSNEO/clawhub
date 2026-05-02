@@ -132,6 +132,12 @@ function npmPackFixture(files: Record<string, string>) {
   return gzipSync(tar);
 }
 
+function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function makeCtx(partial: Record<string, unknown>) {
   const partialRunQuery =
     typeof partial.runQuery === "function"
@@ -5254,7 +5260,9 @@ describe("httpApiV1 handlers", () => {
     );
     form.append(
       "clawpack",
-      new File([pack], "demo-plugin-1.0.0.tgz", { type: "application/octet-stream" }),
+      new File([bytesToArrayBuffer(pack)], "demo-plugin-1.0.0.tgz", {
+        type: "application/octet-stream",
+      }),
     );
 
     const response = await __handlers.publishPackageV1Handler(
