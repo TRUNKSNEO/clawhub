@@ -19,6 +19,7 @@ import {
   updateReleaseStaticScanInternal,
   softDeletePackageInternal,
   transferPackageOwnerInternal,
+  repairPackageIdentityInternal,
   searchForViewerInternal,
   searchPublic,
 } from "./packages";
@@ -51,7 +52,10 @@ const listHandler = (
       name: string;
       pendingReview?: boolean;
       scanStatus?: string;
-      latestRelease: { vtStatus: string | null; staticScanStatus: string | null } | null;
+      latestRelease: {
+        vtStatus: string | null;
+        staticScanStatus: string | null;
+      } | null;
     }>
   >
 )._handler;
@@ -94,7 +98,11 @@ const listVersionsHandler = (
       name: string;
       paginationOpts: { cursor: string | null; numItems: number };
     },
-    { page: Array<{ version: string }>; isDone: boolean; continueCursor: string }
+    {
+      page: Array<{ version: string }>;
+      isDone: boolean;
+      continueCursor: string;
+    }
   >
 )._handler;
 const insertReleaseInternalHandler = (
@@ -260,7 +268,12 @@ const updateReleaseStaticScanInternalHandler = (
 const softDeletePackageInternalHandler = (
   softDeletePackageInternal as unknown as WrappedHandler<
     { userId: string; name: string },
-    { ok: true; packageId: string; releaseCount: number; alreadyDeleted: boolean }
+    {
+      ok: true;
+      packageId: string;
+      releaseCount: number;
+      alreadyDeleted: boolean;
+    }
   >
 )._handler;
 const transferPackageOwnerInternalHandler = (
@@ -274,6 +287,18 @@ const transferPackageOwnerInternalHandler = (
       reason?: string;
     },
     { ok: true; packageId: string; ownerPublisherId?: string; channel: string }
+  >
+)._handler;
+const repairPackageIdentityInternalHandler = (
+  repairPackageIdentityInternal as unknown as WrappedHandler<
+    {
+      actorUserId: string;
+      name: string;
+      nextName?: string;
+      nextRuntimeId?: string;
+      reason: string;
+    },
+    { ok: true; packageId: string; name: string; runtimeId?: string }
   >
 )._handler;
 
@@ -349,7 +374,11 @@ function makeReleaseDoc(overrides: Partial<Record<string, unknown>> = {}) {
 }
 
 function makeDigestCtx(options: {
-  pages?: Array<{ page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }>;
+  pages?: Array<{
+    page: Array<Record<string, unknown>>;
+    isDone: boolean;
+    continueCursor: string;
+  }>;
   capabilityPages?: Array<{
     page: Array<Record<string, unknown>>;
     isDone: boolean;
@@ -363,7 +392,11 @@ function makeDigestCtx(options: {
     string,
     Map<
       string | null,
-      { page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }
+      {
+        page: Array<Record<string, unknown>>;
+        isDone: boolean;
+        continueCursor: string;
+      }
     >
   >();
   const indexNames: string[] = [];
@@ -371,11 +404,19 @@ function makeDigestCtx(options: {
 
   const setPages = (
     table: string,
-    pages: Array<{ page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }>,
+    pages: Array<{
+      page: Array<Record<string, unknown>>;
+      isDone: boolean;
+      continueCursor: string;
+    }>,
   ) => {
     const pageByCursor = new Map<
       string | null,
-      { page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string }
+      {
+        page: Array<Record<string, unknown>>;
+        isDone: boolean;
+        continueCursor: string;
+      }
     >();
     let cursor: string | null = null;
     for (const page of pages) {
@@ -765,7 +806,11 @@ function makePackageCtx(options: {
   pkg?: Record<string, unknown> | null;
   latestRelease?: Record<string, unknown> | null;
   versionRelease?: Record<string, unknown> | null;
-  versionsPage?: { page: Array<Record<string, unknown>>; isDone: boolean; continueCursor: string };
+  versionsPage?: {
+    page: Array<Record<string, unknown>>;
+    isDone: boolean;
+    continueCursor: string;
+  };
   ownerPublisher?: Record<string, unknown> | null;
   viewerMembershipRole?: "owner" | "admin" | "publisher" | null;
 }) {
@@ -1537,7 +1582,12 @@ describe("packages public queries", () => {
   it("caps public search scans below the Convex read limit budget", async () => {
     const { ctx, paginate } = makeDigestCtx({
       pages: Array.from({ length: 170 }, (_, index) => ({
-        page: [makeDigest(`noise-${index}`, { executesCode: false, updatedAt: 10_000 - index })],
+        page: [
+          makeDigest(`noise-${index}`, {
+            executesCode: false,
+            updatedAt: 10_000 - index,
+          }),
+        ],
         isDone: false,
         continueCursor: `cursor:${index + 1}`,
       })),
@@ -1628,7 +1678,10 @@ describe("packages public queries", () => {
     });
 
     await expect(
-      getByNameHandler(ctx, { name: "demo-plugin", viewerUserId: "users:owner" } as never),
+      getByNameHandler(ctx, {
+        name: "demo-plugin",
+        viewerUserId: "users:owner",
+      } as never),
     ).resolves.toBeNull();
     await expect(
       listVersionsHandler(ctx, {
@@ -1765,7 +1818,11 @@ describe("packages public queries", () => {
     const { ctx, patch } = makeSoftDeletePackageCtx({
       releases: [
         makeReleaseDoc(),
-        makeReleaseDoc({ _id: "packageReleases:demo-2", version: "1.1.0", softDeletedAt: 123 }),
+        makeReleaseDoc({
+          _id: "packageReleases:demo-2",
+          version: "1.1.0",
+          softDeletedAt: 123,
+        }),
       ],
     });
 
@@ -1904,6 +1961,52 @@ describe("packages public queries", () => {
     );
   });
 
+  it("lets admins repair a package name and runtime id with an audit trail", async () => {
+    const { ctx, patch, insert } = makeTransferPackageOwnerCtx({
+      pkg: makePackageDoc({
+        name: "whatsapp",
+        normalizedName: "whatsapp",
+        runtimeId: "whatsapp",
+      }),
+    });
+
+    await expect(
+      repairPackageIdentityInternalHandler(ctx, {
+        actorUserId: "users:admin",
+        name: "whatsapp",
+        nextName: "ivangdavila-whatsapp",
+        nextRuntimeId: "ivangdavila-whatsapp",
+        reason: "free official OpenClaw WhatsApp package id",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      packageId: "packages:demo",
+      name: "ivangdavila-whatsapp",
+      runtimeId: "ivangdavila-whatsapp",
+    });
+
+    expect(patch).toHaveBeenCalledWith("packages:demo", {
+      name: "ivangdavila-whatsapp",
+      normalizedName: "ivangdavila-whatsapp",
+      runtimeId: "ivangdavila-whatsapp",
+      updatedAt: expect.any(Number),
+    });
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "package.identity.repair",
+        targetType: "package",
+        targetId: "packages:demo",
+        metadata: expect.objectContaining({
+          previousName: "whatsapp",
+          nextName: "ivangdavila-whatsapp",
+          previousRuntimeId: "whatsapp",
+          nextRuntimeId: "ivangdavila-whatsapp",
+        }),
+      }),
+    );
+  });
+
   it("rejects official package transfers to untrusted publishers", async () => {
     const { ctx } = makeTransferPackageOwnerCtx({
       ownerPublisher: {
@@ -1943,8 +2046,16 @@ describe("packages public queries", () => {
       }),
       [],
       {
-        "users:admin": { _id: "users:admin", role: "admin", trustedPublisher: false },
-        "users:openclaw": { _id: "users:openclaw", role: "user", trustedPublisher: false },
+        "users:admin": {
+          _id: "users:admin",
+          role: "admin",
+          trustedPublisher: false,
+        },
+        "users:openclaw": {
+          _id: "users:openclaw",
+          role: "user",
+          trustedPublisher: false,
+        },
         "publishers:openclaw": {
           _id: "publishers:openclaw",
           kind: "org",
@@ -2071,8 +2182,16 @@ describe("packages public queries", () => {
       }),
       [],
       {
-        "users:admin": { _id: "users:admin", role: "admin", trustedPublisher: false },
-        "users:openclaw": { _id: "users:openclaw", role: "user", trustedPublisher: true },
+        "users:admin": {
+          _id: "users:admin",
+          role: "admin",
+          trustedPublisher: false,
+        },
+        "users:openclaw": {
+          _id: "users:openclaw",
+          role: "user",
+          trustedPublisher: true,
+        },
       },
     );
 
@@ -2107,8 +2226,16 @@ describe("packages public queries", () => {
       }),
       [],
       {
-        "users:owner": { _id: "users:owner", role: "user", trustedPublisher: false },
-        "users:openclaw": { _id: "users:openclaw", role: "user", trustedPublisher: true },
+        "users:owner": {
+          _id: "users:owner",
+          role: "user",
+          trustedPublisher: false,
+        },
+        "users:openclaw": {
+          _id: "users:openclaw",
+          role: "user",
+          trustedPublisher: true,
+        },
       },
     );
 
@@ -2138,7 +2265,11 @@ describe("packages public queries", () => {
       }),
       [],
       {
-        "users:owner": { _id: "users:owner", role: "user", trustedPublisher: false },
+        "users:owner": {
+          _id: "users:owner",
+          role: "user",
+          trustedPublisher: false,
+        },
         "publishers:org": {
           _id: "publishers:org",
           kind: "org",
@@ -2176,7 +2307,11 @@ describe("packages public queries", () => {
       }),
       [],
       {
-        "users:owner": { _id: "users:owner", role: "user", trustedPublisher: false },
+        "users:owner": {
+          _id: "users:owner",
+          role: "user",
+          trustedPublisher: false,
+        },
         "publishers:owner": {
           _id: "publishers:owner",
           kind: "user",
@@ -2810,7 +2945,10 @@ describe("packages public queries", () => {
             ],
             [
               "storage:manifest",
-              JSON.stringify({ id: "demo.plugin", tools: [{ name: "demoTool" }] }),
+              JSON.stringify({
+                id: "demo.plugin",
+                tools: [{ name: "demoTool" }],
+              }),
             ],
             [
               "storage:code",
@@ -2902,7 +3040,9 @@ describe("packages public queries", () => {
       },
     };
 
-    const result = await getByNameHandler(ctx as never, { name: "demo-plugin" });
+    const result = await getByNameHandler(ctx as never, {
+      name: "demo-plugin",
+    });
     expect(result?.package?.name).toBe("demo-plugin");
   });
 
@@ -2920,11 +3060,12 @@ describe("packages public queries", () => {
             if (table !== "packages") throw new Error(`Unexpected table ${table}`);
             return {
               withIndex: vi.fn(() => ({
-                unique: vi
-                  .fn()
-                  .mockResolvedValue(
-                    makePackageDoc({ ownerUserId: "users:owner", scanStatus: "pending" }),
-                  ),
+                unique: vi.fn().mockResolvedValue(
+                  makePackageDoc({
+                    ownerUserId: "users:owner",
+                    scanStatus: "pending",
+                  }),
+                ),
               })),
             };
           }),
@@ -2954,7 +3095,11 @@ describe("packages public queries", () => {
               return { _id: "users:owner", handle: "owner" };
             }
             if (id === "publishers:owner") {
-              return { _id: "publishers:owner", kind: "user", linkedUserId: "users:owner" };
+              return {
+                _id: "publishers:owner",
+                kind: "user",
+                linkedUserId: "users:owner",
+              };
             }
             return null;
           }),
@@ -3028,7 +3173,11 @@ describe("packages public queries", () => {
         db: {
           get: vi.fn(async (id: string) => {
             if (id === "publishers:owner") {
-              return { _id: "publishers:owner", kind: "user", linkedUserId: "users:owner" };
+              return {
+                _id: "publishers:owner",
+                kind: "user",
+                linkedUserId: "users:owner",
+              };
             }
             return null;
           }),

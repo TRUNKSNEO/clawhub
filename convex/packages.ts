@@ -259,7 +259,11 @@ async function runActionRef<T>(
 }
 
 async function runAfterRef(
-  ctx: { scheduler: { runAfter: (delayMs: number, ref: never, args: never) => Promise<unknown> } },
+  ctx: {
+    scheduler: {
+      runAfter: (delayMs: number, ref: never, args: never) => Promise<unknown>;
+    };
+  },
   delayMs: number,
   ref: unknown,
   args: unknown,
@@ -449,7 +453,12 @@ async function upsertPackageBadge(
     await ctx.db.patch(existing._id, { byUserId: userId, at });
     return;
   }
-  await ctx.db.insert("packageBadges", { packageId, kind, byUserId: userId, at });
+  await ctx.db.insert("packageBadges", {
+    packageId,
+    kind,
+    byUserId: userId,
+    at,
+  });
 }
 
 async function removePackageBadge(
@@ -1513,7 +1522,10 @@ async function searchPackagesImpl(
   if (args.highlightedOnly) {
     const digests = await fetchHighlightedPackageDigests(ctx, args);
     return digests
-      .map((digest) => ({ score: packageSearchScore(digest, queryText), package: digest }))
+      .map((digest) => ({
+        score: packageSearchScore(digest, queryText),
+        package: digest,
+      }))
       .filter((entry) => entry.score > 0)
       .sort(
         (a, b) =>
@@ -1522,7 +1534,10 @@ async function searchPackagesImpl(
           b.package.updatedAt - a.package.updatedAt,
       )
       .slice(0, targetCount)
-      .map((entry) => ({ score: entry.score, package: toPublicPackageListItem(entry.package) }));
+      .map((entry) => ({
+        score: entry.score,
+        package: toPublicPackageListItem(entry.package),
+      }));
   }
 
   const builder = args.capabilityTag
@@ -2509,6 +2524,77 @@ export const transferPackageOwnerInternal = internalMutation({
   },
 });
 
+export const repairPackageIdentityInternal = internalMutation({
+  args: {
+    actorUserId: v.id("users"),
+    name: v.string(),
+    nextName: v.optional(v.string()),
+    nextRuntimeId: v.optional(v.string()),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const actor = await ctx.db.get(args.actorUserId);
+    if (!actor || actor.deletedAt || actor.deactivatedAt) throw new ConvexError("Unauthorized");
+    assertAdmin(actor);
+
+    const normalizedName = normalizePackageName(args.name);
+    const pkg = await getPackageByNormalizedName(ctx, normalizedName);
+    if (!pkg || pkg.softDeletedAt) throw new ConvexError("Package not found");
+
+    const patch: Partial<Doc<"packages">> = { updatedAt: now };
+    const metadata: Record<string, unknown> = {
+      name: normalizedName,
+      reason: args.reason,
+    };
+
+    if (typeof args.nextName === "string") {
+      const nextName = normalizePackageName(args.nextName);
+      if (!nextName) throw new ConvexError("Package name required");
+      const existingByName = await getPackageByNormalizedName(ctx, nextName);
+      if (existingByName && existingByName._id !== pkg._id && !existingByName.softDeletedAt) {
+        throw new ConvexError(`Package "${nextName}" already exists`);
+      }
+      patch.name = nextName;
+      patch.normalizedName = nextName;
+      metadata.previousName = pkg.normalizedName;
+      metadata.nextName = nextName;
+    }
+
+    if (typeof args.nextRuntimeId === "string") {
+      const nextRuntimeId = args.nextRuntimeId.trim();
+      if (!nextRuntimeId) throw new ConvexError("Runtime id required");
+      const runtimeCollision = await ctx.db
+        .query("packages")
+        .withIndex("by_runtime_id", (q) => q.eq("runtimeId", nextRuntimeId))
+        .unique();
+      if (runtimeCollision && runtimeCollision._id !== pkg._id && !runtimeCollision.softDeletedAt) {
+        throw new ConvexError(`Plugin id "${nextRuntimeId}" is already claimed by another package`);
+      }
+      patch.runtimeId = nextRuntimeId;
+      metadata.previousRuntimeId = pkg.runtimeId;
+      metadata.nextRuntimeId = nextRuntimeId;
+    }
+
+    await ctx.db.patch(pkg._id, patch);
+    await ctx.db.insert("auditLogs", {
+      actorUserId: args.actorUserId,
+      action: "package.identity.repair",
+      targetType: "package",
+      targetId: pkg._id,
+      metadata,
+      createdAt: now,
+    });
+
+    return {
+      ok: true as const,
+      packageId: pkg._id,
+      name: patch.normalizedName ?? pkg.normalizedName,
+      runtimeId: patch.runtimeId ?? pkg.runtimeId,
+    };
+  },
+});
+
 export const insertReleaseInternal = internalMutation({
   args: {
     actorUserId: v.id("users"),
@@ -3220,12 +3306,20 @@ export const removeBetaLatestPackageTagsInternal = internalMutation({
       const normalizedName = normalizePackageName(name);
       const pkg = await getPackageByNormalizedName(ctx, normalizedName);
       if (!pkg || pkg.softDeletedAt || pkg.family === "skill") {
-        results.push({ name: normalizedName, ok: false as const, error: "Package not found" });
+        results.push({
+          name: normalizedName,
+          ok: false as const,
+          error: "Package not found",
+        });
         continue;
       }
       const latestReleaseId = pkg.latestReleaseId ?? pkg.tags.latest;
       if (!latestReleaseId) {
-        results.push({ name: normalizedName, ok: true as const, changed: false });
+        results.push({
+          name: normalizedName,
+          ok: true as const,
+          changed: false,
+        });
         continue;
       }
       const latestRelease = await ctx.db.get(latestReleaseId);
