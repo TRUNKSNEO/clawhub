@@ -65,6 +65,10 @@ export declare const PackageAppealStatusSchema: import("arktype/internal/variant
 export type PackageAppealStatus = (typeof PackageAppealStatusSchema)[inferred];
 export declare const PackageAppealListStatusSchema: import("arktype/internal/variants/string.ts").StringType<"open" | "all" | "accepted" | "rejected", {}>;
 export type PackageAppealListStatus = (typeof PackageAppealListStatusSchema)[inferred];
+export declare const PackageOfficialMigrationPhaseSchema: import("arktype/internal/variants/string.ts").StringType<"planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw", {}>;
+export type PackageOfficialMigrationPhase = (typeof PackageOfficialMigrationPhaseSchema)[inferred];
+export declare const PackageOfficialMigrationListPhaseSchema: import("arktype/internal/variants/string.ts").StringType<"all" | "planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw", {}>;
+export type PackageOfficialMigrationListPhase = (typeof PackageOfficialMigrationListPhaseSchema)[inferred];
 export declare const PackageArtifactSummarySchema: import("arktype/internal/variants/object.ts").ObjectType<{
     kind: "legacy-zip" | "npm-pack";
     sha256?: string | undefined;
@@ -651,6 +655,89 @@ export declare const ApiV1PackageReadinessResponseSchema: import("arktype/intern
     blockers: string[];
 }, {}>;
 export type ApiV1PackageReadinessResponse = (typeof ApiV1PackageReadinessResponseSchema)[inferred];
+export declare const PackageOfficialMigrationUpsertRequestSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    bundledPluginId: string;
+    packageName: string;
+    owner?: string | undefined;
+    sourceRepo?: string | undefined;
+    sourcePath?: string | undefined;
+    sourceCommit?: string | undefined;
+    phase?: "planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw" | undefined;
+    blockers?: string[] | undefined;
+    hostTargetsComplete?: boolean | undefined;
+    scanClean?: boolean | undefined;
+    moderationApproved?: boolean | undefined;
+    runtimeBundlesReady?: boolean | undefined;
+    notes?: string | undefined;
+}, {}>;
+export type PackageOfficialMigrationUpsertRequest = (typeof PackageOfficialMigrationUpsertRequestSchema)[inferred];
+export declare const PackageOfficialMigrationItemSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    migrationId: string;
+    bundledPluginId: string;
+    packageName: string;
+    phase: "planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw";
+    blockers: string[];
+    hostTargetsComplete: boolean;
+    scanClean: boolean;
+    moderationApproved: boolean;
+    runtimeBundlesReady: boolean;
+    createdAt: number;
+    updatedAt: number;
+    packageId?: string | null | undefined;
+    owner?: string | null | undefined;
+    sourceRepo?: string | null | undefined;
+    sourcePath?: string | null | undefined;
+    sourceCommit?: string | null | undefined;
+    notes?: string | null | undefined;
+}, {}>;
+export type PackageOfficialMigrationItem = (typeof PackageOfficialMigrationItemSchema)[inferred];
+export declare const ApiV1PackageOfficialMigrationListResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    items: {
+        migrationId: string;
+        bundledPluginId: string;
+        packageName: string;
+        phase: "planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw";
+        blockers: string[];
+        hostTargetsComplete: boolean;
+        scanClean: boolean;
+        moderationApproved: boolean;
+        runtimeBundlesReady: boolean;
+        createdAt: number;
+        updatedAt: number;
+        packageId?: string | null | undefined;
+        owner?: string | null | undefined;
+        sourceRepo?: string | null | undefined;
+        sourcePath?: string | null | undefined;
+        sourceCommit?: string | null | undefined;
+        notes?: string | null | undefined;
+    }[];
+    nextCursor: string | null;
+    done: boolean;
+}, {}>;
+export type ApiV1PackageOfficialMigrationListResponse = (typeof ApiV1PackageOfficialMigrationListResponseSchema)[inferred];
+export declare const ApiV1PackageOfficialMigrationResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    ok: true;
+    migration: {
+        migrationId: string;
+        bundledPluginId: string;
+        packageName: string;
+        phase: "planned" | "published" | "clawpack-ready" | "legacy-zip-only" | "metadata-ready" | "blocked" | "ready-for-openclaw";
+        blockers: string[];
+        hostTargetsComplete: boolean;
+        scanClean: boolean;
+        moderationApproved: boolean;
+        runtimeBundlesReady: boolean;
+        createdAt: number;
+        updatedAt: number;
+        packageId?: string | null | undefined;
+        owner?: string | null | undefined;
+        sourceRepo?: string | null | undefined;
+        sourcePath?: string | null | undefined;
+        sourceCommit?: string | null | undefined;
+        notes?: string | null | undefined;
+    };
+}, {}>;
+export type ApiV1PackageOfficialMigrationResponse = (typeof ApiV1PackageOfficialMigrationResponseSchema)[inferred];
 export declare const PackageModerationQueueStatusSchema: import("arktype/internal/variants/string.ts").StringType<"open" | "all" | "blocked" | "manual", {}>;
 export type PackageModerationQueueStatus = (typeof PackageModerationQueueStatusSchema)[inferred];
 export declare const ApiV1PackageModerationQueueResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
