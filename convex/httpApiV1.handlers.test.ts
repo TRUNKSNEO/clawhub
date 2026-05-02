@@ -3945,6 +3945,124 @@ describe("httpApiV1 handlers", () => {
     });
   });
 
+  it("package migrations lists official migration rows", async () => {
+    vi.mocked(requireApiTokenUser).mockResolvedValue({
+      userId: "users:moderator",
+      user: { _id: "users:moderator", role: "moderator" },
+    } as never);
+    const runQuery = vi.fn(async (_query: unknown, args: Record<string, unknown>) => {
+      if (isRateLimitArgs(args)) return okRate();
+      return {
+        items: [
+          {
+            migrationId: "officialPluginMigrations:1",
+            bundledPluginId: "core.search",
+            packageName: "@scope/demo",
+            packageId: "packages:1",
+            owner: "platform",
+            sourceRepo: "openclaw/openclaw",
+            sourcePath: "plugins/search",
+            sourceCommit: "abc123",
+            phase: "ready-for-openclaw",
+            blockers: [],
+            hostTargetsComplete: true,
+            scanClean: true,
+            moderationApproved: true,
+            runtimeBundlesReady: false,
+            notes: null,
+            createdAt: 100,
+            updatedAt: 200,
+          },
+        ],
+        nextCursor: null,
+        done: true,
+      };
+    });
+    const runMutation = vi.fn().mockResolvedValue(okRate());
+
+    const response = await __handlers.packagesGetRouterV1Handler(
+      makeCtx({ runQuery, runMutation }),
+      new Request("https://example.com/api/v1/packages/migrations?phase=all&limit=10", {
+        headers: { Authorization: "Bearer clh_test" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      items: [{ bundledPluginId: "core.search", phase: "ready-for-openclaw" }],
+    });
+    expect(runQuery).toHaveBeenCalledWith(internal.packages.listOfficialPluginMigrationsInternal, {
+      actorUserId: "users:moderator",
+      cursor: null,
+      limit: 10,
+      phase: "all",
+    });
+  });
+
+  it("package migrations upserts official migration rows", async () => {
+    vi.mocked(requireApiTokenUser).mockResolvedValue({
+      userId: "users:admin",
+      user: { _id: "users:admin", role: "admin" },
+    } as never);
+    const runMutation = vi.fn(async (_mutation: unknown, args: Record<string, unknown>) => {
+      if (isRateLimitArgs(args)) return okRate();
+      return {
+        ok: true,
+        migration: {
+          migrationId: "officialPluginMigrations:1",
+          bundledPluginId: "core.search",
+          packageName: "@scope/demo",
+          packageId: "packages:1",
+          owner: "platform",
+          sourceRepo: "openclaw/openclaw",
+          sourcePath: "plugins/search",
+          sourceCommit: null,
+          phase: "blocked",
+          blockers: ["missing ClawPack"],
+          hostTargetsComplete: true,
+          scanClean: false,
+          moderationApproved: false,
+          runtimeBundlesReady: false,
+          notes: null,
+          createdAt: 100,
+          updatedAt: 200,
+        },
+      };
+    });
+
+    const response = await __handlers.packagesPostRouterV1Handler(
+      makeCtx({ runMutation }),
+      new Request("https://example.com/api/v1/packages/migrations", {
+        method: "POST",
+        headers: { Authorization: "Bearer clh_test" },
+        body: JSON.stringify({
+          bundledPluginId: "core.search",
+          packageName: "@scope/demo",
+          owner: "platform",
+          sourceRepo: "openclaw/openclaw",
+          sourcePath: "plugins/search",
+          phase: "blocked",
+          blockers: ["missing ClawPack"],
+          hostTargetsComplete: true,
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      migration: { bundledPluginId: "core.search", phase: "blocked" },
+    });
+    expect(runMutation).toHaveBeenCalledWith(
+      internal.packages.upsertOfficialPluginMigrationForUserInternal,
+      expect.objectContaining({
+        actorUserId: "users:admin",
+        bundledPluginId: "core.search",
+        packageName: "@scope/demo",
+      }),
+    );
+  });
+
   it("package report triage posts moderator decisions", async () => {
     vi.mocked(requireApiTokenUser).mockResolvedValue({
       userId: "users:moderator",

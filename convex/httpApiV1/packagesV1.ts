@@ -1,8 +1,11 @@
 import {
   PackageArtifactBackfillRequestSchema,
+  ApiV1PackageOfficialMigrationListResponseSchema,
+  ApiV1PackageOfficialMigrationResponseSchema,
   ApiV1PackageModerationStatusResponseSchema,
   PackageAppealResolveRequestSchema,
   PackageAppealRequestSchema,
+  PackageOfficialMigrationUpsertRequestSchema,
   PackageReportRequestSchema,
   PackageReportTriageRequestSchema,
   PackageReleaseModerationRequestSchema,
@@ -12,6 +15,7 @@ import {
   parseArk,
   type PackageAppealListStatus,
   type PackageModerationQueueStatus,
+  type PackageOfficialMigrationListPhase,
   type PackageReportListStatus,
 } from "clawhub-schema";
 import { api, internal } from "../_generated/api";
@@ -84,6 +88,8 @@ const internalRefs = internal as unknown as {
     submitPackageAppealForUserInternal: unknown;
     listPackageAppealsInternal: unknown;
     resolvePackageAppealForUserInternal: unknown;
+    listOfficialPluginMigrationsInternal: unknown;
+    upsertOfficialPluginMigrationForUserInternal: unknown;
     backfillPackageArtifactKindsInternal: unknown;
     listPackageModerationQueueInternal: unknown;
   };
@@ -215,6 +221,26 @@ function parsePackageAppealListStatus(value: string | null): PackageAppealListSt
     normalized === "open" ||
     normalized === "accepted" ||
     normalized === "rejected" ||
+    normalized === "all"
+  ) {
+    return normalized;
+  }
+  return null;
+}
+
+function parsePackageOfficialMigrationPhase(
+  value: string | null,
+): PackageOfficialMigrationListPhase | null {
+  if (!value) return "all";
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "planned" ||
+    normalized === "published" ||
+    normalized === "clawpack-ready" ||
+    normalized === "legacy-zip-only" ||
+    normalized === "metadata-ready" ||
+    normalized === "blocked" ||
+    normalized === "ready-for-openclaw" ||
     normalized === "all"
   ) {
     return normalized;
@@ -1406,6 +1432,41 @@ export async function packagesPostRouterV1Handler(ctx: ActionCtx, request: Reque
     }
   }
 
+  if (segments[0] === "migrations" && segments.length === 1) {
+    const rate = await applyRateLimit(ctx, request, "write");
+    if (!rate.ok) return rate.response;
+    const auth = await requireApiTokenUserOrResponse(ctx, request, rate.headers);
+    if (!auth.ok) return auth.response;
+
+    try {
+      const body = parseArk(
+        PackageOfficialMigrationUpsertRequestSchema,
+        await request.json(),
+        "Package official migration payload",
+      );
+      const result = await runMutationRef(
+        ctx,
+        internalRefs.packages.upsertOfficialPluginMigrationForUserInternal,
+        {
+          actorUserId: auth.userId,
+          ...body,
+        },
+      );
+      const parsed = parseArk(
+        ApiV1PackageOfficialMigrationResponseSchema,
+        result,
+        "Package official migration response",
+      );
+      return json(parsed, 200, rate.headers);
+    } catch (error) {
+      return text(
+        error instanceof Error ? error.message : "Package official migration update failed",
+        400,
+        rate.headers,
+      );
+    }
+  }
+
   if (
     segments[0] === "reports" &&
     segments[1] &&
@@ -2017,6 +2078,35 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
       status,
     });
     return json(result, 200, rate.headers);
+  }
+
+  if (segments[0] === "migrations" && segments.length === 1) {
+    const rate = await applyRateLimit(ctx, request, "read");
+    if (!rate.ok) return rate.response;
+    const auth = await requireApiTokenUserOrResponse(ctx, request, rate.headers);
+    if (!auth.ok) return auth.response;
+
+    const url = new URL(request.url);
+    const phase = parsePackageOfficialMigrationPhase(url.searchParams.get("phase"));
+    if (!phase) return text("Invalid official migration phase", 400, rate.headers);
+    const limit = Math.max(1, Math.min(toOptionalNumber(url.searchParams.get("limit")) ?? 25, 100));
+    const cursor = url.searchParams.get("cursor");
+    const result = await runQueryRef(
+      ctx,
+      internalRefs.packages.listOfficialPluginMigrationsInternal,
+      {
+        actorUserId: auth.userId,
+        cursor: cursor ?? null,
+        limit,
+        phase,
+      },
+    );
+    const parsed = parseArk(
+      ApiV1PackageOfficialMigrationListResponseSchema,
+      result,
+      "Package official migration list response",
+    );
+    return json(parsed, 200, rate.headers);
   }
 
   if (segments[1] === "moderation" && segments.length === 2) {
