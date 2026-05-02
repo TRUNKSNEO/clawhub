@@ -575,7 +575,9 @@ clawhub package set-migration core.search --package @openclaw/search-plugin --ph
   - Local ClawPack npm-pack tarball: `./my-plugin-1.2.3.tgz`
   - GitHub repo: `owner/repo` or `owner/repo@ref`
   - GitHub URL: `https://github.com/owner/repo`
-- Metadata is auto-detected from `package.json`, `openclaw.plugin.json`, and `openclaw.bundle.json`.
+- Metadata is auto-detected from `package.json`, `openclaw.plugin.json`, and
+  real OpenClaw bundle markers such as `.codex-plugin/plugin.json`,
+  `.claude-plugin/plugin.json`, and `.cursor-plugin/plugin.json`.
 - `.tgz` sources are treated as ClawPack. The CLI uploads the exact npm-pack
   bytes and uses the extracted `package/` contents only for validation and
   metadata prefill.
@@ -583,9 +585,8 @@ clawhub package set-migration core.search --package @openclaw/search-plugin --ph
   legacy ZIP compatibility path. The CLI does not run `npm pack` for you.
 - For GitHub sources, source attribution is auto-populated from the repo, resolved commit, ref, and subpath.
 - For local folders, source attribution is auto-detected from local git when the origin remote points at GitHub.
-- External code plugins must declare `openclaw.compat.pluginApi`,
-  `openclaw.build.openclawVersion`, `openclaw.hostTargets`, and
-  `openclaw.environment` explicitly.
+- External code plugins must declare `openclaw.compat.pluginApi` and
+  `openclaw.build.openclawVersion` explicitly.
   Top-level `package.json.version` is not used as a fallback for publish validation.
 - `--dry-run` previews the resolved publish payload without uploading.
 - `--json` emits machine-readable output for CI.
@@ -625,13 +626,6 @@ External code plugins need a small amount of OpenClaw metadata in
   "type": "module",
   "openclaw": {
     "extensions": ["./index.ts"],
-    "hostTargets": ["darwin-arm64", "linux-x64", "win32-x64"],
-    "environment": {
-      "browser": false,
-      "desktop": false,
-      "nativeDependencies": [],
-      "externalServices": []
-    },
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2"
     },
@@ -646,19 +640,13 @@ Required fields:
 
 - `openclaw.compat.pluginApi`
 - `openclaw.build.openclawVersion`
-- `openclaw.hostTargets`
-- `openclaw.environment`
 
 Notes:
 
 - `package.json.version` is your package release version, but it is not used as
   a fallback for OpenClaw compatibility/build validation.
-- `openclaw.hostTargets` should list explicit supported host targets such as
-  `darwin-arm64`, `linux-x64`, or `win32-x64`; avoid vague prose-only platform
-  support.
-- `openclaw.environment` should explicitly declare runtime requirements. Use
-  `{}` when the plugin has no browser, desktop, native dependency, external
-  service, binary, audio, or OS-permission requirements.
+- `openclaw.hostTargets` and `openclaw.environment` are optional metadata.
+  ClawHub may surface them when present, but they are not required for publish.
 - `openclaw.compat.minGatewayVersion` and
   `openclaw.build.pluginSdkVersion` are optional extras if you want to publish
   more detailed compatibility metadata.

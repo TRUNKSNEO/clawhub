@@ -924,6 +924,8 @@ Notes:
 - Legacy ZIP-only versions are intentionally omitted.
 - `dist.tarball`, `dist.integrity`, and `dist.shasum` use npm-compatible
   fields so users can point npm at the mirror if they choose.
+- Scoped package packuments support both `/api/npm/@scope/name` and npm's
+  encoded `/api/npm/@scope%2Fname` request path.
 
 ### `GET /api/npm/{package}/-/{tarball}.tgz`
 
@@ -997,8 +999,12 @@ Publishes a code-plugin or bundle-plugin release.
 Validation highlights:
 
 - `family` must be `code-plugin` or `bundle-plugin`.
-- Code plugins require `package.json`, `openclaw.plugin.json`, source repo metadata, source commit metadata, config schema metadata, explicit `openclaw.hostTargets`, and explicit `openclaw.environment`.
-- Bundle plugins require at least one host target.
+- Plugin packages require `openclaw.plugin.json`. ClawPack `.tgz` uploads must
+  contain it at `package/openclaw.plugin.json`.
+- Code plugins require `package.json`, source repo metadata, source commit
+  metadata, config schema metadata, `openclaw.compat.pluginApi`, and
+  `openclaw.build.openclawVersion`.
+- `openclaw.hostTargets` and `openclaw.environment` are optional metadata.
 - Only trusted publishers may publish to the `official` channel.
 - On-behalf publishes still validate official-channel eligibility against the target owner account.
 

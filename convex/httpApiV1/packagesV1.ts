@@ -2696,8 +2696,7 @@ function buildPackageReadiness(pkg: PublicPackageDocLike) {
   const add = (check: PackageReadinessCheck) => checks.push(check);
   const hostTargets = pkg.capabilities?.hostTargets ?? [];
   const capabilityTags = pkg.capabilities?.capabilityTags ?? [];
-  const hasEnvironmentMetadata =
-    pkg.family !== "code-plugin" || capabilityTags.includes("environment:declared");
+  const hasEnvironmentMetadata = capabilityTags.includes("environment:declared");
   const scanStatus = pkg.verification?.scanStatus ?? "not-run";
 
   add({
@@ -2751,19 +2750,19 @@ function buildPackageReadiness(pkg: PublicPackageDocLike) {
   add({
     id: "host-targets",
     label: "Host targets",
-    status: hostTargets.length > 0 ? "pass" : "fail",
+    status: hostTargets.length > 0 ? "pass" : "warn",
     message:
       hostTargets.length > 0
         ? `Targets: ${hostTargets.join(", ")}.`
-        : "At least one host target is required.",
+        : "Host targets are optional and not declared.",
   });
   add({
     id: "environment",
     label: "Environment metadata",
-    status: hasEnvironmentMetadata ? "pass" : "fail",
+    status: hasEnvironmentMetadata ? "pass" : "warn",
     message: hasEnvironmentMetadata
       ? "Runtime environment requirements are declared."
-      : "openclaw.environment is required for code plugins.",
+      : "Runtime environment metadata is optional and not declared.",
   });
   add({
     id: "scan",
