@@ -137,10 +137,13 @@ describe("skills.listDashboardPaginated", () => {
       by_owner_active_updated: [makeSkill("slack")],
     });
 
-    const result = await handler(ctx as never, {
-      ownerUserId: "users:owner",
-      paginationOpts,
-    } as never);
+    const result = await handler(
+      ctx as never,
+      {
+        ownerUserId: "users:owner",
+        paginationOpts,
+      } as never,
+    );
 
     expect(indexCalls).toContain("by_owner_active_updated");
     expect(result.page).toEqual([expect.objectContaining({ slug: "slack" })]);
@@ -152,10 +155,13 @@ describe("skills.listDashboardPaginated", () => {
       by_owner_active_updated: [makeSkill("legacy-skill")],
     });
 
-    const result = await handler(ctx as never, {
-      ownerPublisherId: "publishers:self",
-      paginationOpts,
-    } as never);
+    const result = await handler(
+      ctx as never,
+      {
+        ownerPublisherId: "publishers:self",
+        paginationOpts,
+      } as never,
+    );
 
     expect(indexCalls).toContain("by_owner_active_updated");
     expect(result.page).toEqual([expect.objectContaining({ slug: "legacy-skill" })]);
@@ -169,10 +175,13 @@ describe("skills.listDashboardPaginated", () => {
       ],
     });
 
-    const result = await handler(ctx as never, {
-      ownerPublisherId: "publishers:self",
-      paginationOpts,
-    } as never);
+    const result = await handler(
+      ctx as never,
+      {
+        ownerPublisherId: "publishers:self",
+        paginationOpts,
+      } as never,
+    );
 
     expect(indexCalls).toContain("by_owner_publisher_active_updated");
     expect(indexCalls).not.toContain("by_owner_active_updated");
@@ -187,10 +196,13 @@ describe("skills.listDashboardPaginated", () => {
       ],
     });
 
-    const result = await handler(ctx as never, {
-      ownerPublisherId: "publishers:org",
-      paginationOpts,
-    } as never);
+    const result = await handler(
+      ctx as never,
+      {
+        ownerPublisherId: "publishers:org",
+        paginationOpts,
+      } as never,
+    );
 
     expect(indexCalls).toContain("by_owner_publisher_active_updated");
     expect(result.page).toEqual([expect.objectContaining({ slug: "team-skill" })]);
