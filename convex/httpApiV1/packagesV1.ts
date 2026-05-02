@@ -384,7 +384,9 @@ function encodePackagePath(name: string) {
   return name
     .split("/")
     .map((segment) =>
-      segment.startsWith("@") ? `@${encodeURIComponent(segment.slice(1))}` : encodeURIComponent(segment),
+      segment.startsWith("@")
+        ? `@${encodeURIComponent(segment.slice(1))}`
+        : encodeURIComponent(segment),
     )
     .join("/");
 }

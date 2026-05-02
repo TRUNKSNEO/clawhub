@@ -4471,8 +4471,7 @@ describe("httpApiV1 handlers", () => {
       versions: {
         "1.0.0": {
           dist: {
-            tarball:
-              "https://example.com/api/npm/@scope/demo-plugin/-/scope-demo-plugin-1.0.0.tgz",
+            tarball: "https://example.com/api/npm/@scope/demo-plugin/-/scope-demo-plugin-1.0.0.tgz",
           },
         },
       },

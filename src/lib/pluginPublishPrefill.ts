@@ -130,7 +130,8 @@ export async function derivePluginPrefill(
       getString(bundleManifest?.name),
     version: getString(packageJson?.version),
     sourceRepo: extractSourceRepo(packageJson),
-    bundleFormat: getString(bundleManifest?.format) ?? getString(openclaw?.bundleFormat) ?? bundleFormat,
+    bundleFormat:
+      getString(bundleManifest?.format) ?? getString(openclaw?.bundleFormat) ?? bundleFormat,
     hostTargets: hostTargets.length > 0 ? hostTargets.join(", ") : undefined,
     compatibility: pluginManifest
       ? normalizeOpenClawExternalPluginCompatibility(packageJson)
