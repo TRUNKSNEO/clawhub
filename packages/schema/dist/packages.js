@@ -249,6 +249,19 @@ export const PackageReleaseModerationRequestSchema = type({
     state: PackageReleaseModerationStateSchema,
     reason: "string",
 });
+export const PackageArtifactBackfillRequestSchema = type({
+    cursor: "string|null?",
+    batchSize: "number?",
+    dryRun: "boolean?",
+});
+export const ApiV1PackageArtifactBackfillResponseSchema = type({
+    ok: "true",
+    scanned: "number",
+    updated: "number",
+    nextCursor: "string|null",
+    done: "boolean",
+    dryRun: "boolean",
+});
 export const ApiV1PackageReleaseModerationResponseSchema = type({
     ok: "true",
     packageId: "string",

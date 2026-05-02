@@ -473,6 +473,21 @@ export declare const PackageReleaseModerationRequestSchema: import("arktype/inte
     reason: string;
 }, {}>;
 export type PackageReleaseModerationRequest = (typeof PackageReleaseModerationRequestSchema)[inferred];
+export declare const PackageArtifactBackfillRequestSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    cursor?: string | null | undefined;
+    batchSize?: number | undefined;
+    dryRun?: boolean | undefined;
+}, {}>;
+export type PackageArtifactBackfillRequest = (typeof PackageArtifactBackfillRequestSchema)[inferred];
+export declare const ApiV1PackageArtifactBackfillResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    ok: true;
+    scanned: number;
+    updated: number;
+    nextCursor: string | null;
+    done: boolean;
+    dryRun: boolean;
+}, {}>;
+export type ApiV1PackageArtifactBackfillResponse = (typeof ApiV1PackageArtifactBackfillResponseSchema)[inferred];
 export declare const ApiV1PackageReleaseModerationResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
     ok: true;
     packageId: string;

@@ -16,6 +16,7 @@ import { cmdInspect } from "./cli/commands/inspect.js";
 import { cmdBanUser, cmdSetRole, cmdUnbanUser } from "./cli/commands/moderation.js";
 import { cmdMergeSkill, cmdRenameSkill } from "./cli/commands/ownership.js";
 import {
+  cmdBackfillPackageArtifacts,
   cmdDownloadPackage,
   cmdExplorePackages,
   cmdGetPackageTrustedPublisher,
@@ -446,6 +447,19 @@ packageCmd
   .action(async (name, options) => {
     const opts = await resolveGlobalOpts();
     await cmdModeratePackageRelease(opts, name, options);
+  });
+
+packageCmd
+  .command("backfill-artifacts")
+  .description("Backfill missing package artifact-kind metadata (admin only)")
+  .option("--cursor <cursor>", "Resume cursor")
+  .option("--batch-size <n>", "Batch size", (value) => Number.parseInt(value, 10))
+  .option("--all", "Continue until all pages are processed")
+  .option("--apply", "Write changes; defaults to dry-run")
+  .option("--json", "Output JSON")
+  .action(async (options) => {
+    const opts = await resolveGlobalOpts();
+    await cmdBackfillPackageArtifacts(opts, options);
   });
 
 packageCmd

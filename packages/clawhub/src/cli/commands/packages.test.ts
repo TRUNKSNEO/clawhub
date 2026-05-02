@@ -33,6 +33,7 @@ const {
   cmdExplorePackages,
   cmdGetPackageTrustedPublisher,
   cmdInspectPackage,
+  cmdBackfillPackageArtifacts,
   cmdModeratePackageRelease,
   cmdPublishPackage,
   cmdSetPackageTrustedPublisher,
@@ -462,6 +463,71 @@ describe("package commands", () => {
     );
     expect(mockLog).toHaveBeenCalledWith(
       "OK. @scope/demo@1.2.3 moderation state set to quarantined.",
+    );
+  });
+
+  it("dry-runs package artifact metadata backfill by default", async () => {
+    httpMocks.apiRequest.mockResolvedValueOnce({
+      ok: true,
+      scanned: 20,
+      updated: 3,
+      nextCursor: "cursor-1",
+      done: false,
+      dryRun: true,
+    });
+
+    await cmdBackfillPackageArtifacts(makeOpts(), { batchSize: 20 });
+
+    expect(httpMocks.apiRequest).toHaveBeenCalledWith(
+      "https://clawhub.ai",
+      {
+        method: "POST",
+        path: "/api/v1/packages/backfill/artifacts",
+        token: "tkn",
+        body: {
+          cursor: null,
+          batchSize: 20,
+          dryRun: true,
+        },
+      },
+      expect.anything(),
+    );
+    expect(mockLog).toHaveBeenCalledWith(
+      "Dry run package artifact backfill: scanned 20, would update 3.",
+    );
+    expect(mockLog).toHaveBeenCalledWith("Next cursor: cursor-1");
+  });
+
+  it("can apply package artifact backfill across all pages", async () => {
+    httpMocks.apiRequest
+      .mockResolvedValueOnce({
+        ok: true,
+        scanned: 100,
+        updated: 8,
+        nextCursor: "cursor-2",
+        done: false,
+        dryRun: false,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        scanned: 5,
+        updated: 1,
+        nextCursor: null,
+        done: true,
+        dryRun: false,
+      });
+
+    await cmdBackfillPackageArtifacts(makeOpts(), { apply: true, all: true, batchSize: 100 });
+
+    expect(httpMocks.apiRequest).toHaveBeenCalledTimes(2);
+    expect(httpMocks.apiRequest.mock.calls[0]?.[1]).toMatchObject({
+      body: { cursor: null, batchSize: 100, dryRun: false },
+    });
+    expect(httpMocks.apiRequest.mock.calls[1]?.[1]).toMatchObject({
+      body: { cursor: "cursor-2", batchSize: 100, dryRun: false },
+    });
+    expect(mockLog).toHaveBeenCalledWith(
+      "Applied package artifact backfill: scanned 105, updated 9.",
     );
   });
 

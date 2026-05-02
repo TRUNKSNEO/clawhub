@@ -323,6 +323,28 @@ Example:
 clawhub package moderate @openclaw/example-plugin --version 1.2.3 --state quarantined --reason "suspicious native payload"
 ```
 
+### `package backfill-artifacts`
+
+- Admin command for labeling older package releases with explicit artifact-kind
+  metadata.
+- Calls `POST /api/v1/packages/backfill/artifacts`.
+- Defaults to dry-run. Pass `--apply` to write changes.
+- Labels releases without ClawPack storage as `legacy-zip`; releases that
+  already have ClawPack storage are repaired as `npm-pack`.
+- Flags:
+  - `--batch-size <n>`: number of releases to scan, max 500.
+  - `--cursor <cursor>`: resume cursor from a previous run.
+  - `--all`: continue until the backfill is done.
+  - `--apply`: write changes instead of dry-run.
+  - `--json`: machine-readable output.
+
+Examples:
+
+```bash
+clawhub package backfill-artifacts --batch-size 100
+clawhub package backfill-artifacts --all --apply
+```
+
 ### `package publish <source>`
 
 - Publishes a code plugin or bundle plugin via `POST /api/v1/packages`.

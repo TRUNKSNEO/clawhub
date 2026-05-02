@@ -4,6 +4,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   backfillPackageReleaseScansInternal,
+  backfillPackageArtifactKindsInternal,
   getPackageReleaseScanBackfillBatchInternal,
   getByName,
   list,
@@ -240,6 +241,24 @@ const backfillPackageReleaseScansInternalHandler = (
       scheduled?: number;
     },
     { scheduled: number; nextCursor: number; done: boolean }
+  >
+)._handler;
+const backfillPackageArtifactKindsInternalHandler = (
+  backfillPackageArtifactKindsInternal as unknown as WrappedHandler<
+    {
+      actorUserId: string;
+      cursor?: string | null;
+      batchSize?: number;
+      dryRun?: boolean;
+    },
+    {
+      ok: true;
+      scanned: number;
+      updated: number;
+      nextCursor: string | null;
+      done: boolean;
+      dryRun: boolean;
+    }
   >
 )._handler;
 const updateReleaseStaticScanInternalHandler = (
@@ -3216,6 +3235,129 @@ describe("packages public queries", () => {
 });
 
 describe("package scan backfill", () => {
+  it("dry-runs package artifact kind backfill without patching releases", async () => {
+    const patch = vi.fn();
+    const result = await backfillPackageArtifactKindsInternalHandler(
+      {
+        db: {
+          get: vi.fn(async (id: string) =>
+            id === "users:admin" ? { _id: id, role: "admin" } : null,
+          ),
+          insert: vi.fn(),
+          patch,
+          replace: vi.fn(),
+          delete: vi.fn(),
+          normalizeId: vi.fn(),
+          query: vi.fn((table: string) => {
+            if (table !== "packageReleases") throw new Error(`Unexpected table ${table}`);
+            return {
+              withIndex: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  paginate: vi.fn().mockResolvedValue({
+                    page: [
+                      {
+                        _id: "packageReleases:legacy",
+                        packageId: "packages:demo",
+                        version: "1.0.0",
+                        integritySha256: "legacy-sha",
+                        artifactKind: undefined,
+                      },
+                      {
+                        _id: "packageReleases:current",
+                        packageId: "packages:demo",
+                        version: "2.0.0",
+                        integritySha256: "current-sha",
+                        artifactKind: "legacy-zip",
+                      },
+                    ],
+                    continueCursor: "cursor-1",
+                    isDone: false,
+                  }),
+                })),
+              })),
+            };
+          }),
+        },
+      } as never,
+      { actorUserId: "users:admin", batchSize: 25, dryRun: true },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      scanned: 2,
+      updated: 1,
+      nextCursor: "cursor-1",
+      done: false,
+      dryRun: true,
+    });
+    expect(patch).not.toHaveBeenCalled();
+  });
+
+  it("labels legacy package releases and refreshes latest artifact summary", async () => {
+    const patch = vi.fn();
+    const result = await backfillPackageArtifactKindsInternalHandler(
+      {
+        db: {
+          get: vi.fn(async (id: string) => {
+            if (id === "users:admin") return { _id: id, role: "admin" };
+            if (id === "packages:demo") {
+              return {
+                ...makePackageDoc(),
+                _id: "packages:demo",
+                latestReleaseId: "packageReleases:legacy",
+                latestVersionSummary: { version: "1.0.0", changelog: "init" },
+              };
+            }
+            return null;
+          }),
+          insert: vi.fn(),
+          patch,
+          replace: vi.fn(),
+          delete: vi.fn(),
+          normalizeId: vi.fn(),
+          query: vi.fn((table: string) => {
+            if (table !== "packageReleases") throw new Error(`Unexpected table ${table}`);
+            return {
+              withIndex: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  paginate: vi.fn().mockResolvedValue({
+                    page: [
+                      {
+                        _id: "packageReleases:legacy",
+                        packageId: "packages:demo",
+                        version: "1.0.0",
+                        integritySha256: "legacy-sha",
+                        artifactKind: undefined,
+                      },
+                    ],
+                    continueCursor: null,
+                    isDone: true,
+                  }),
+                })),
+              })),
+            };
+          }),
+        },
+      } as never,
+      { actorUserId: "users:admin", dryRun: false },
+    );
+
+    expect(result.updated).toBe(1);
+    expect(patch).toHaveBeenCalledWith("packageReleases:legacy", { artifactKind: "legacy-zip" });
+    expect(patch).toHaveBeenCalledWith(
+      "packages:demo",
+      expect.objectContaining({
+        latestVersionSummary: expect.objectContaining({
+          artifact: {
+            kind: "legacy-zip",
+            sha256: "legacy-sha",
+            format: "zip",
+          },
+        }),
+      }),
+    );
+  });
+
   it("includes releases missing static scan in the backfill batch", async () => {
     const result = await getPackageReleaseScanBackfillBatchInternalHandler(
       {
