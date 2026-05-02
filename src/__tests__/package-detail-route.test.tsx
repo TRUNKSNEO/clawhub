@@ -95,8 +95,9 @@ vi.mock("../lib/packageApi", () => ({
   fetchPackageReadme: vi.fn(),
   fetchPackageVersion: vi.fn(),
   isRateLimitedPackageApiError: (error: unknown) => isRateLimitedPackageApiErrorMock(error),
-  getPackageArtifactDownloadPath: vi.fn((name: string, version: string) =>
-    `/api/v1/packages/${name}/versions/${version}/artifact/download`,
+  getPackageArtifactDownloadPath: vi.fn(
+    (name: string, version: string) =>
+      `/api/v1/packages/${name}/versions/${version}/artifact/download`,
   ),
   getPackageDownloadPath: vi.fn((name: string, version?: string | null) =>
     version

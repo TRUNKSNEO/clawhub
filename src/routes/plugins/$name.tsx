@@ -432,7 +432,9 @@ function PluginDetailRoute() {
                         {artifact.npmTarballName ? (
                           <>
                             <dt className="font-semibold text-[color:var(--ink-soft)]">Tarball</dt>
-                            <dd className="break-all font-mono text-xs">{artifact.npmTarballName}</dd>
+                            <dd className="break-all font-mono text-xs">
+                              {artifact.npmTarballName}
+                            </dd>
                           </>
                         ) : null}
                         {formatArtifactSize(artifact.size) ? (
@@ -452,9 +454,7 @@ function PluginDetailRoute() {
                             <dt className="font-semibold text-[color:var(--ink-soft)]">
                               Integrity
                             </dt>
-                            <dd className="break-all font-mono text-xs">
-                              {artifact.npmIntegrity}
-                            </dd>
+                            <dd className="break-all font-mono text-xs">{artifact.npmIntegrity}</dd>
                           </>
                         ) : null}
                       </dl>
