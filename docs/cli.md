@@ -237,6 +237,10 @@ Stores your API token + cached registry URL.
   - `--family skill|code-plugin|bundle-plugin`
   - `--official`
   - `--executes-code`
+  - `--target <target>`, `--os <os>`, `--arch <arch>`, `--libc <libc>`
+  - `--requires-browser`, `--requires-desktop`, `--requires-native-deps`
+  - `--requires-external-service`, `--external-service <name>`
+  - `--binary <name>`, `--os-permission <name>`
   - `--limit <n>` (1-100, default: 25)
   - `--json`
 
@@ -244,6 +248,7 @@ Examples:
 
 ```bash
 clawhub package explore --family code-plugin
+clawhub package explore --family code-plugin --os darwin --requires-desktop
 clawhub package explore episodic-claw --family code-plugin
 ```
 

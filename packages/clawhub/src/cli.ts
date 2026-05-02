@@ -375,6 +375,17 @@ packageCmd
   .option("--family <family>", "skill|code-plugin|bundle-plugin")
   .option("--official", "Only official packages")
   .option("--executes-code", "Only packages that execute code")
+  .option("--target <target>", "Filter by host target, e.g. darwin-arm64")
+  .option("--os <os>", "Filter by host OS, e.g. darwin, linux, win32")
+  .option("--arch <arch>", "Filter by host architecture, e.g. arm64 or x64")
+  .option("--libc <libc>", "Filter by libc, e.g. glibc or musl")
+  .option("--requires-browser", "Only packages that require a browser")
+  .option("--requires-desktop", "Only packages that require local desktop access")
+  .option("--requires-native-deps", "Only packages with native dependency requirements")
+  .option("--requires-external-service", "Only packages that require an external service")
+  .option("--external-service <name>", "Filter by named external service")
+  .option("--binary <name>", "Filter by required local binary")
+  .option("--os-permission <name>", "Filter by required OS permission")
   .option(
     "--limit <n>",
     "Number of packages to show (max 100)",

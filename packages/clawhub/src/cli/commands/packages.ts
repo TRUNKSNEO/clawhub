@@ -61,6 +61,17 @@ type PackageExploreOptions = {
   family?: PackageFamily;
   official?: boolean;
   executesCode?: boolean;
+  target?: string;
+  os?: string;
+  arch?: string;
+  libc?: string;
+  requiresBrowser?: boolean;
+  requiresDesktop?: boolean;
+  requiresNativeDeps?: boolean;
+  requiresExternalService?: boolean;
+  externalService?: string;
+  binary?: string;
+  osPermission?: string;
   limit?: number;
   json?: boolean;
 };
@@ -188,6 +199,20 @@ type PackagePublishPlan = {
   };
 };
 
+function appendPackageExploreFilters(url: URL, options: PackageExploreOptions) {
+  if (options.target) url.searchParams.set("target", options.target);
+  if (options.os) url.searchParams.set("os", options.os);
+  if (options.arch) url.searchParams.set("arch", options.arch);
+  if (options.libc) url.searchParams.set("libc", options.libc);
+  if (options.requiresBrowser) url.searchParams.set("requiresBrowser", "true");
+  if (options.requiresDesktop) url.searchParams.set("requiresDesktop", "true");
+  if (options.requiresNativeDeps) url.searchParams.set("requiresNativeDeps", "true");
+  if (options.requiresExternalService) url.searchParams.set("requiresExternalService", "true");
+  if (options.externalService) url.searchParams.set("externalService", options.externalService);
+  if (options.binary) url.searchParams.set("binary", options.binary);
+  if (options.osPermission) url.searchParams.set("osPermission", options.osPermission);
+}
+
 type PrintableFile = {
   path: string;
   size: number | null;
@@ -225,6 +250,7 @@ export async function cmdExplorePackages(
       if (typeof options.executesCode === "boolean") {
         url.searchParams.set("executesCode", String(options.executesCode));
       }
+      appendPackageExploreFilters(url, options);
       const result = await apiRequest(
         registry,
         { method: "GET", url: url.toString(), token },
@@ -258,6 +284,7 @@ export async function cmdExplorePackages(
     if (typeof options.executesCode === "boolean") {
       url.searchParams.set("executesCode", String(options.executesCode));
     }
+    appendPackageExploreFilters(url, options);
     const result = await apiRequest(
       registry,
       { method: "GET", url: url.toString(), token },
