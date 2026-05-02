@@ -4034,7 +4034,7 @@ describe("packages public queries", () => {
           get: vi.fn(async (id: string) => {
             if (id === "users:admin") return { _id: id, role: "admin" };
             if (id === "officialPluginMigrations:1") {
-              return { _id: id, ...(insertedMigration ?? {}) };
+              return { _id: id, ...insertedMigration };
             }
             return null;
           }),
