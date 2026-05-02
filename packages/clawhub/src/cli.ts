@@ -23,6 +23,7 @@ import {
   cmdInspectPackage,
   cmdDeletePackageTrustedPublisher,
   cmdModeratePackageRelease,
+  cmdPackageModerationQueue,
   cmdPackageReadiness,
   cmdPublishPackage,
   cmdSetPackageTrustedPublisher,
@@ -459,6 +460,23 @@ packageCmd
   .action(async (name, options) => {
     const opts = await resolveGlobalOpts();
     await cmdModeratePackageRelease(opts, name, options);
+  });
+
+packageCmd
+  .command("moderation-queue")
+  .description("List package releases that need moderation")
+  .option("--status <status>", "open|blocked|manual|all", "open")
+  .option("--cursor <cursor>", "Resume cursor")
+  .option(
+    "--limit <n>",
+    "Number of releases to show (max 100)",
+    (value) => Number.parseInt(value, 10),
+    25,
+  )
+  .option("--json", "Output JSON")
+  .action(async (options) => {
+    const opts = await resolveGlobalOpts();
+    await cmdPackageModerationQueue(opts, options);
   });
 
 packageCmd

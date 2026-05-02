@@ -11,6 +11,7 @@ import {
   ApiV1PackageArtifactBackfillResponseSchema,
   ApiV1PackageArtifactResponseSchema,
   ApiV1PackageListResponseSchema,
+  ApiV1PackageModerationQueueResponseSchema,
   ApiV1PackagePublishResponseSchema,
   ApiV1PackageReadinessResponseSchema,
   ApiV1PackageReleaseModerationResponseSchema,
@@ -25,6 +26,7 @@ import {
   type PackageCapabilitySummary,
   type PackageCompatibility,
   type PackageFamily,
+  type PackageModerationQueueStatus,
   type PackageReleaseModerationState,
   type PackageTrustedPublisher,
   type PackageVerificationSummary,
@@ -117,6 +119,13 @@ type PackageModerateOptions = {
   version?: string;
   state?: PackageReleaseModerationState;
   reason?: string;
+  json?: boolean;
+};
+
+type PackageModerationQueueOptions = {
+  status?: PackageModerationQueueStatus;
+  cursor?: string;
+  limit?: number;
   json?: boolean;
 };
 
@@ -800,6 +809,60 @@ export async function cmdModeratePackageRelease(
   } catch (error) {
     spinner?.fail(formatError(error));
     throw error;
+  }
+}
+
+export async function cmdPackageModerationQueue(
+  opts: GlobalOpts,
+  options: PackageModerationQueueOptions = {},
+) {
+  const status = options.status?.trim() || "open";
+  if (!["open", "blocked", "manual", "all"].includes(status)) {
+    fail("--status must be open, blocked, manual, or all");
+  }
+
+  const token = await requireAuthToken();
+  const registry = await getRegistry(opts, { cache: true });
+  const url = registryUrl(`${ApiRoutes.packages}/moderation/queue`, registry);
+  url.searchParams.set("status", status);
+  if (options.cursor?.trim()) url.searchParams.set("cursor", options.cursor.trim());
+  url.searchParams.set("limit", String(clampLimit(options.limit ?? 25, 100)));
+
+  const result = await apiRequest(
+    registry,
+    {
+      method: "GET",
+      url: url.toString(),
+      token,
+    },
+    ApiV1PackageModerationQueueResponseSchema,
+  );
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  if (result.items.length === 0) {
+    console.log("No package releases in the moderation queue.");
+  } else {
+    for (const item of result.items) {
+      const state = item.moderationState ? ` ${item.moderationState}` : "";
+      const reasons = item.reasons.length > 0 ? ` [${item.reasons.join(", ")}]` : "";
+      console.log(`${item.name}@${item.version} ${item.scanStatus}${state}${reasons}`);
+      console.log(
+        `  ${item.family} ${item.channel} ${item.artifactKind ?? "unknown-artifact"}${item.isOfficial ? " official" : ""}`,
+      );
+      if (item.sourceRepo || item.sourceCommit) {
+        console.log(`  source: ${item.sourceRepo ?? "unknown"}@${item.sourceCommit ?? "unknown"}`);
+      }
+      if (item.moderationReason) {
+        console.log(`  reason: ${item.moderationReason}`);
+      }
+    }
+  }
+  if (!result.done && result.nextCursor) {
+    console.log(`Next cursor: ${result.nextCursor}`);
   }
 }
 

@@ -432,6 +432,56 @@ Response:
 }
 ```
 
+### `GET /api/v1/packages/moderation/queue`
+
+Moderator/admin endpoint for package release review queues.
+
+Auth:
+
+- Requires an API token for a moderator or admin user.
+
+Query params:
+
+- `status` (optional): `open` (default), `blocked`, `manual`, or `all`
+- `limit` (optional): integer (1-100)
+- `cursor` (optional): pagination cursor
+
+Status meanings:
+
+- `open`: suspicious, malicious, pending, quarantined, or revoked releases.
+- `blocked`: quarantined, revoked, or malicious releases.
+- `manual`: any release with a manual moderation override.
+- `all`: any release with a manual override or non-clean scan state.
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "packageId": "packages:...",
+      "releaseId": "packageReleases:...",
+      "name": "@openclaw/example-plugin",
+      "displayName": "Example Plugin",
+      "family": "code-plugin",
+      "channel": "community",
+      "isOfficial": false,
+      "version": "1.2.3",
+      "createdAt": 1730000000000,
+      "artifactKind": "npm-pack",
+      "scanStatus": "malicious",
+      "moderationState": "quarantined",
+      "moderationReason": "manual review",
+      "sourceRepo": "openclaw/example-plugin",
+      "sourceCommit": "abc123",
+      "reasons": ["manual:quarantined", "scan:malicious"]
+    }
+  ],
+  "nextCursor": null,
+  "done": true
+}
+```
+
 ### `POST /api/v1/packages/{name}/versions/{version}/moderation`
 
 Moderator/admin endpoint for package release review.

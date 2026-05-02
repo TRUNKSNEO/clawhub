@@ -328,6 +328,25 @@ Example:
 clawhub package moderate @openclaw/example-plugin --version 1.2.3 --state quarantined --reason "suspicious native payload"
 ```
 
+### `package moderation-queue`
+
+- Moderator/admin command for reviewing package releases that need attention.
+- Calls `GET /api/v1/packages/moderation/queue`.
+- Does not change release state; use `package moderate` for approve,
+  quarantine, or revoke actions.
+- Flags:
+  - `--status open|blocked|manual|all`: queue filter, default `open`.
+  - `--cursor <cursor>`: resume cursor from a previous page.
+  - `--limit <n>`: number of releases to show, max 100.
+  - `--json`: machine-readable output.
+
+Examples:
+
+```bash
+clawhub package moderation-queue
+clawhub package moderation-queue --status blocked --limit 50
+```
+
 ### `package backfill-artifacts`
 
 - Admin command for labeling older package releases with explicit artifact-kind

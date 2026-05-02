@@ -513,6 +513,31 @@ export declare const ApiV1PackageReadinessResponseSchema: import("arktype/intern
     blockers: string[];
 }, {}>;
 export type ApiV1PackageReadinessResponse = (typeof ApiV1PackageReadinessResponseSchema)[inferred];
+export declare const PackageModerationQueueStatusSchema: import("arktype/internal/variants/string.ts").StringType<"open" | "blocked" | "manual" | "all", {}>;
+export type PackageModerationQueueStatus = (typeof PackageModerationQueueStatusSchema)[inferred];
+export declare const ApiV1PackageModerationQueueResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    items: {
+        packageId: string;
+        releaseId: string;
+        name: string;
+        displayName: string;
+        family: "skill" | "code-plugin" | "bundle-plugin";
+        channel: "official" | "community" | "private";
+        isOfficial: boolean;
+        version: string;
+        createdAt: number;
+        scanStatus: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+        reasons: string[];
+        artifactKind?: "legacy-zip" | "npm-pack" | null | undefined;
+        moderationState?: "approved" | "quarantined" | "revoked" | null | undefined;
+        moderationReason?: string | null | undefined;
+        sourceRepo?: string | null | undefined;
+        sourceCommit?: string | null | undefined;
+    }[];
+    nextCursor: string | null;
+    done: boolean;
+}, {}>;
+export type ApiV1PackageModerationQueueResponse = (typeof ApiV1PackageModerationQueueResponseSchema)[inferred];
 export declare const ApiV1PackageReleaseModerationResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
     ok: true;
     packageId: string;

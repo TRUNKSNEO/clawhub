@@ -35,6 +35,7 @@ const {
   cmdInspectPackage,
   cmdBackfillPackageArtifacts,
   cmdModeratePackageRelease,
+  cmdPackageModerationQueue,
   cmdPackageReadiness,
   cmdPublishPackage,
   cmdSetPackageTrustedPublisher,
@@ -473,6 +474,49 @@ describe("package commands", () => {
     expect(mockLog).toHaveBeenCalledWith(
       "OK. @scope/demo@1.2.3 moderation state set to quarantined.",
     );
+  });
+
+  it("lists the package moderation queue", async () => {
+    httpMocks.apiRequest.mockResolvedValueOnce({
+      items: [
+        {
+          packageId: "pkg_1",
+          releaseId: "rel_1",
+          name: "@scope/demo",
+          displayName: "Demo",
+          family: "code-plugin",
+          channel: "community",
+          isOfficial: false,
+          version: "1.2.3",
+          createdAt: 1,
+          artifactKind: "npm-pack",
+          scanStatus: "malicious",
+          moderationState: "quarantined",
+          moderationReason: "manual review",
+          sourceRepo: "openclaw/demo",
+          sourceCommit: "abc123",
+          reasons: ["manual:quarantined", "scan:malicious"],
+        },
+      ],
+      nextCursor: "cursor-1",
+      done: false,
+    });
+
+    await cmdPackageModerationQueue(makeOpts(), { status: "blocked", limit: 10 });
+
+    const request = httpMocks.apiRequest.mock.calls[0]?.[1] as { url?: string } | undefined;
+    const url = new URL(String(request?.url));
+    expect(url.pathname).toBe("/api/v1/packages/moderation/queue");
+    expect(url.searchParams.get("status")).toBe("blocked");
+    expect(url.searchParams.get("limit")).toBe("10");
+    expect(httpMocks.apiRequest.mock.calls[0]?.[1]).toMatchObject({
+      method: "GET",
+      token: "tkn",
+    });
+    expect(mockLog).toHaveBeenCalledWith(
+      "@scope/demo@1.2.3 malicious quarantined [manual:quarantined, scan:malicious]",
+    );
+    expect(mockLog).toHaveBeenCalledWith("Next cursor: cursor-1");
   });
 
   it("dry-runs package artifact metadata backfill by default", async () => {

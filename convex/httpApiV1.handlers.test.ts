@@ -3768,6 +3768,68 @@ describe("httpApiV1 handlers", () => {
     );
   });
 
+  it("package moderation queue lists releases for moderators", async () => {
+    vi.mocked(requireApiTokenUser).mockResolvedValue({
+      userId: "users:moderator",
+      user: { _id: "users:moderator", role: "moderator" },
+    } as never);
+    const runQuery = vi.fn(async (_query: unknown, args: Record<string, unknown>) => {
+      if (isRateLimitArgs(args)) return okRate();
+      return {
+        items: [
+          {
+            packageId: "packages:demo-plugin",
+            releaseId: "packageReleases:1",
+            name: "demo-plugin",
+            displayName: "Demo Plugin",
+            family: "code-plugin",
+            channel: "community",
+            isOfficial: false,
+            version: "1.0.0",
+            createdAt: 1,
+            artifactKind: "npm-pack",
+            scanStatus: "malicious",
+            moderationState: "quarantined",
+            moderationReason: "manual review",
+            sourceRepo: "openclaw/demo-plugin",
+            sourceCommit: "abc123",
+            reasons: ["manual:quarantined", "scan:malicious"],
+          },
+        ],
+        nextCursor: "cursor-1",
+        done: false,
+      };
+    });
+    const runMutation = vi.fn().mockResolvedValue(okRate());
+
+    const response = await __handlers.packagesGetRouterV1Handler(
+      makeCtx({ runQuery, runMutation }),
+      new Request("https://example.com/api/v1/packages/moderation/queue?status=blocked&limit=20", {
+        headers: { Authorization: "Bearer clh_test" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      items: [
+        {
+          name: "demo-plugin",
+          version: "1.0.0",
+          scanStatus: "malicious",
+          moderationState: "quarantined",
+        },
+      ],
+      nextCursor: "cursor-1",
+      done: false,
+    });
+    expect(runQuery).toHaveBeenCalledWith(internal.packages.listPackageModerationQueueInternal, {
+      actorUserId: "users:moderator",
+      cursor: null,
+      limit: 20,
+      status: "blocked",
+    });
+  });
+
   it("package artifact backfill posts admin dry-run requests", async () => {
     vi.mocked(requireApiTokenUser).mockResolvedValue({
       userId: "users:admin",

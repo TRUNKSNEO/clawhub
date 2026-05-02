@@ -13,6 +13,7 @@ import {
   publishPackageForUserInternal,
   getVersionByName,
   insertReleaseInternal,
+  listPackageModerationQueueInternal,
   reservePackageNameInternal,
   listPublicPage,
   listPageForViewerInternal,
@@ -258,6 +259,29 @@ const backfillPackageArtifactKindsInternalHandler = (
       nextCursor: string | null;
       done: boolean;
       dryRun: boolean;
+    }
+  >
+)._handler;
+const listPackageModerationQueueInternalHandler = (
+  listPackageModerationQueueInternal as unknown as WrappedHandler<
+    {
+      actorUserId: string;
+      cursor?: string | null;
+      limit?: number;
+      status?: "open" | "blocked" | "manual" | "all";
+    },
+    {
+      items: Array<{
+        packageId: string;
+        releaseId: string;
+        name: string;
+        version: string;
+        scanStatus: string;
+        moderationState?: string | null;
+        reasons: string[];
+      }>;
+      nextCursor: string | null;
+      done: boolean;
     }
   >
 )._handler;
@@ -3236,6 +3260,93 @@ describe("packages public queries", () => {
 });
 
 describe("package scan backfill", () => {
+  it("lists blocked package releases for the moderation queue", async () => {
+    const result = await listPackageModerationQueueInternalHandler(
+      {
+        db: {
+          get: vi.fn(async (id: string) => {
+            if (id === "users:moderator") return { _id: id, role: "moderator" };
+            if (id === "packages:demo") {
+              return {
+                ...makePackageDoc(),
+                _id: "packages:demo",
+                name: "@scope/demo",
+                displayName: "Demo",
+                family: "code-plugin",
+                channel: "community",
+                isOfficial: false,
+              };
+            }
+            return null;
+          }),
+          query: vi.fn((table: string) => {
+            if (table !== "packageReleases") throw new Error(`Unexpected table ${table}`);
+            return {
+              withIndex: vi.fn(() => ({
+                order: vi.fn(() => ({
+                  paginate: vi.fn().mockResolvedValue({
+                    page: [
+                      {
+                        _id: "packageReleases:blocked",
+                        packageId: "packages:demo",
+                        version: "1.2.3",
+                        createdAt: 123,
+                        artifactKind: "npm-pack",
+                        sha256hash: "a".repeat(64),
+                        verification: { scanStatus: "suspicious" },
+                        staticScan: {
+                          status: "malicious",
+                          reasonCodes: ["malware.test"],
+                          findings: [],
+                          summary: "malware",
+                          engineVersion: "test",
+                          checkedAt: 1,
+                        },
+                        manualModeration: {
+                          state: "quarantined",
+                          reason: "manual review",
+                          reviewerUserId: "users:moderator",
+                          updatedAt: 2,
+                        },
+                        source: {
+                          repo: "openclaw/demo",
+                          commit: "abc123",
+                        },
+                      },
+                    ],
+                    continueCursor: null,
+                    isDone: true,
+                  }),
+                })),
+              })),
+            };
+          }),
+        },
+      } as never,
+      { actorUserId: "users:moderator", limit: 10, status: "blocked" },
+    );
+
+    expect(result).toEqual({
+      items: [
+        expect.objectContaining({
+          packageId: "packages:demo",
+          releaseId: "packageReleases:blocked",
+          name: "@scope/demo",
+          version: "1.2.3",
+          artifactKind: "npm-pack",
+          scanStatus: "malicious",
+          moderationState: "quarantined",
+          moderationReason: "manual review",
+          sourceRepo: "openclaw/demo",
+          sourceCommit: "abc123",
+          reasons: ["manual:quarantined", "scan:malicious", "static:malicious"],
+        }),
+      ],
+      nextCursor: null,
+      done: true,
+    });
+  });
+
   it("dry-runs package artifact kind backfill without patching releases", async () => {
     const patch = vi.fn();
     const result = await backfillPackageArtifactKindsInternalHandler(

@@ -280,6 +280,29 @@ export const ApiV1PackageReadinessResponseSchema = type({
     checks: PackageReadinessCheckSchema.array(),
     blockers: "string[]",
 });
+export const PackageModerationQueueStatusSchema = type('"open"|"blocked"|"manual"|"all"');
+export const ApiV1PackageModerationQueueResponseSchema = type({
+    items: type({
+        packageId: "string",
+        releaseId: "string",
+        name: "string",
+        displayName: "string",
+        family: PackageFamilySchema,
+        channel: PackageChannelSchema,
+        isOfficial: "boolean",
+        version: "string",
+        createdAt: "number",
+        artifactKind: PackageArtifactKindSchema.or("null").optional(),
+        scanStatus: '"clean"|"suspicious"|"malicious"|"pending"|"not-run"',
+        moderationState: PackageReleaseModerationStateSchema.or("null").optional(),
+        moderationReason: "string|null?",
+        sourceRepo: "string|null?",
+        sourceCommit: "string|null?",
+        reasons: "string[]",
+    }).array(),
+    nextCursor: "string|null",
+    done: "boolean",
+});
 export const ApiV1PackageReleaseModerationResponseSchema = type({
     ok: "true",
     packageId: "string",

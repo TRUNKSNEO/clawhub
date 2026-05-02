@@ -345,6 +345,34 @@ export const ApiV1PackageReadinessResponseSchema = type({
 });
 export type ApiV1PackageReadinessResponse = (typeof ApiV1PackageReadinessResponseSchema)[inferred];
 
+export const PackageModerationQueueStatusSchema = type('"open"|"blocked"|"manual"|"all"');
+export type PackageModerationQueueStatus = (typeof PackageModerationQueueStatusSchema)[inferred];
+
+export const ApiV1PackageModerationQueueResponseSchema = type({
+  items: type({
+    packageId: "string",
+    releaseId: "string",
+    name: "string",
+    displayName: "string",
+    family: PackageFamilySchema,
+    channel: PackageChannelSchema,
+    isOfficial: "boolean",
+    version: "string",
+    createdAt: "number",
+    artifactKind: PackageArtifactKindSchema.or("null").optional(),
+    scanStatus: '"clean"|"suspicious"|"malicious"|"pending"|"not-run"',
+    moderationState: PackageReleaseModerationStateSchema.or("null").optional(),
+    moderationReason: "string|null?",
+    sourceRepo: "string|null?",
+    sourceCommit: "string|null?",
+    reasons: "string[]",
+  }).array(),
+  nextCursor: "string|null",
+  done: "boolean",
+});
+export type ApiV1PackageModerationQueueResponse =
+  (typeof ApiV1PackageModerationQueueResponseSchema)[inferred];
+
 export const ApiV1PackageReleaseModerationResponseSchema = type({
   ok: "true",
   packageId: "string",

@@ -4,6 +4,7 @@ import {
   type PackageArtifactSummary,
   type PackageChannel,
   type PackageFamily,
+  type PackageModerationQueueStatus,
   type PackagePublishRequest,
   type PackageVerificationTier,
 } from "clawhub-schema";
@@ -170,6 +171,25 @@ type PublicPackageListItem = {
   executesCode: boolean;
   verificationTier: PackageVerificationTier | null;
 };
+type PackageReleaseScanStatus = ReturnType<typeof resolvePackageReleaseScanStatus>;
+type PackageModerationQueueItem = {
+  packageId: Id<"packages">;
+  releaseId: Id<"packageReleases">;
+  name: string;
+  displayName: string;
+  family: PackageFamily;
+  channel: PackageChannel;
+  isOfficial: boolean;
+  version: string;
+  createdAt: number;
+  artifactKind?: Doc<"packageReleases">["artifactKind"] | null;
+  scanStatus: PackageReleaseScanStatus;
+  moderationState?: NonNullable<Doc<"packageReleases">["manualModeration"]>["state"] | null;
+  moderationReason?: string | null;
+  sourceRepo?: string | null;
+  sourceCommit?: string | null;
+  reasons: string[];
+};
 
 function getPackageOwnerKey(
   pkg: Pick<PackageDoc, "ownerUserId" | "ownerPublisherId">,
@@ -198,6 +218,42 @@ function getRequestedPackageOwnerKey(args: {
 
 function isReservedPackagePlaceholder(pkg: PackageDoc | null | undefined) {
   return Boolean(pkg && !pkg.latestReleaseId && !pkg.latestVersionSummary);
+}
+
+function getPackageModerationQueueReasons(
+  release: Doc<"packageReleases">,
+  scanStatus: PackageReleaseScanStatus,
+) {
+  const reasons: string[] = [];
+  if (release.manualModeration?.state) reasons.push(`manual:${release.manualModeration.state}`);
+  if (scanStatus !== "clean" && scanStatus !== "not-run") reasons.push(`scan:${scanStatus}`);
+  if (release.staticScan?.status === "suspicious" || release.staticScan?.status === "malicious") {
+    reasons.push(`static:${release.staticScan.status}`);
+  }
+  if (release.vtAnalysis?.status === "suspicious" || release.vtAnalysis?.status === "malicious") {
+    reasons.push(`vt:${release.vtAnalysis.status}`);
+  }
+  return [...new Set(reasons)];
+}
+
+function shouldIncludeReleaseInModerationQueue(
+  release: Doc<"packageReleases">,
+  scanStatus: PackageReleaseScanStatus,
+  status: PackageModerationQueueStatus,
+) {
+  const manualState = release.manualModeration?.state;
+  if (status === "manual") return Boolean(manualState);
+  if (status === "blocked") {
+    return manualState === "quarantined" || manualState === "revoked" || scanStatus === "malicious";
+  }
+  if (status === "all") return Boolean(manualState) || scanStatus !== "clean";
+  return (
+    manualState === "quarantined" ||
+    manualState === "revoked" ||
+    scanStatus === "suspicious" ||
+    scanStatus === "malicious" ||
+    scanStatus === "pending"
+  );
 }
 
 type PackageBadgeKind = Doc<"packageBadges">["kind"];
@@ -1997,6 +2053,84 @@ export const moderatePackageReleaseForUserInternal = internalMutation({
       releaseId: release._id,
       state: args.state,
       scanStatus,
+    };
+  },
+});
+
+export const listPackageModerationQueueInternal = internalQuery({
+  args: {
+    actorUserId: v.id("users"),
+    cursor: v.optional(v.union(v.string(), v.null())),
+    limit: v.optional(v.number()),
+    status: v.optional(
+      v.union(v.literal("open"), v.literal("blocked"), v.literal("manual"), v.literal("all")),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const actor = await ctx.db.get(args.actorUserId);
+    if (!actor || actor.deletedAt || actor.deactivatedAt) throw new ConvexError("Unauthorized");
+    assertModerator(actor);
+
+    const limit = Math.max(1, Math.min(Math.round(args.limit ?? 25), 100));
+    const status = args.status ?? "open";
+    let cursor = args.cursor ?? null;
+    let done = false;
+    let scannedPages = 0;
+    const items: PackageModerationQueueItem[] = [];
+
+    while (items.length < limit && !done && scannedPages < 5) {
+      const page = await ctx.db
+        .query("packageReleases")
+        .withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined))
+        .order("desc")
+        .paginate({
+          cursor,
+          numItems: limit,
+        });
+
+      scannedPages += 1;
+      cursor = page.continueCursor;
+      done = page.isDone;
+
+      for (const release of page.page) {
+        if (items.length >= limit) break;
+        const scanStatus = resolvePackageReleaseScanStatus(release);
+        if (!shouldIncludeReleaseInModerationQueue(release, scanStatus, status)) continue;
+
+        const pkg = await ctx.db.get(release.packageId);
+        if (!pkg || pkg.softDeletedAt || pkg.family === "skill") continue;
+        const source = (
+          release.source && typeof release.source === "object" ? release.source : {}
+        ) as {
+          repo?: unknown;
+          commit?: unknown;
+        };
+
+        items.push({
+          packageId: pkg._id,
+          releaseId: release._id,
+          name: pkg.name,
+          displayName: pkg.displayName,
+          family: pkg.family,
+          channel: pkg.channel,
+          isOfficial: pkg.isOfficial,
+          version: release.version,
+          createdAt: release.createdAt,
+          artifactKind: release.artifactKind ?? null,
+          scanStatus,
+          moderationState: release.manualModeration?.state ?? null,
+          moderationReason: release.manualModeration?.reason ?? null,
+          sourceRepo: typeof source.repo === "string" ? source.repo : null,
+          sourceCommit: typeof source.commit === "string" ? source.commit : null,
+          reasons: getPackageModerationQueueReasons(release, scanStatus),
+        });
+      }
+    }
+
+    return {
+      items,
+      nextCursor: done ? null : cursor,
+      done,
     };
   },
 });

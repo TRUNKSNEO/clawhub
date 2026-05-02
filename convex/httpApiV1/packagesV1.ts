@@ -5,6 +5,7 @@ import {
   PackageTrustedPublisherUpsertRequestSchema,
   PublishTokenMintRequestSchema,
   parseArk,
+  type PackageModerationQueueStatus,
 } from "clawhub-schema";
 import { api, internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
@@ -70,6 +71,7 @@ const internalRefs = internal as unknown as {
     softDeletePackageInternal: unknown;
     moderatePackageReleaseForUserInternal: unknown;
     backfillPackageArtifactKindsInternal: unknown;
+    listPackageModerationQueueInternal: unknown;
   };
   packagePublishTokens: {
     createInternal: unknown;
@@ -155,6 +157,22 @@ function getCapabilityTagFromQueryParams(params: URLSearchParams) {
   if (getEnabledQueryFlag(params, "requiresOsPermission")) return "requires:os-permission";
   if (getEnabledQueryFlag(params, "environmentDeclared")) return "environment:declared";
   return undefined;
+}
+
+function parsePackageModerationQueueStatus(
+  value: string | null,
+): PackageModerationQueueStatus | null {
+  if (!value) return "open";
+  const normalized = value.trim().toLowerCase();
+  if (
+    normalized === "open" ||
+    normalized === "blocked" ||
+    normalized === "manual" ||
+    normalized === "all"
+  ) {
+    return normalized;
+  }
+  return null;
 }
 
 type PackageListQueryArgs = {
@@ -1742,6 +1760,30 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
   if (segments.length === 0) return text("Not found", 404);
   if (segments[0] === "search" && new URL(request.url).searchParams.has("q")) {
     return await searchPackages(ctx, request, { includeSkills: true });
+  }
+
+  if (segments[0] === "moderation" && segments[1] === "queue" && segments.length === 2) {
+    const rate = await applyRateLimit(ctx, request, "read");
+    if (!rate.ok) return rate.response;
+    const auth = await requireApiTokenUserOrResponse(ctx, request, rate.headers);
+    if (!auth.ok) return auth.response;
+
+    const url = new URL(request.url);
+    const status = parsePackageModerationQueueStatus(url.searchParams.get("status"));
+    if (!status) return text("Invalid moderation queue status", 400, rate.headers);
+    const limit = Math.max(1, Math.min(toOptionalNumber(url.searchParams.get("limit")) ?? 25, 100));
+    const cursor = url.searchParams.get("cursor");
+    const result = await runQueryRef(
+      ctx,
+      internalRefs.packages.listPackageModerationQueueInternal,
+      {
+        actorUserId: auth.userId,
+        cursor: cursor ?? null,
+        limit,
+        status,
+      },
+    );
+    return json(result, 200, rate.headers);
   }
 
   const rateKind =
