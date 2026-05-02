@@ -95,6 +95,9 @@ vi.mock("../lib/packageApi", () => ({
   fetchPackageReadme: vi.fn(),
   fetchPackageVersion: vi.fn(),
   isRateLimitedPackageApiError: (error: unknown) => isRateLimitedPackageApiErrorMock(error),
+  getPackageArtifactDownloadPath: vi.fn((name: string, version: string) =>
+    `/api/v1/packages/${name}/versions/${version}/artifact/download`,
+  ),
   getPackageDownloadPath: vi.fn((name: string, version?: string | null) =>
     version
       ? `/api/v1/packages/${name}/download?version=${version}`
@@ -291,6 +294,128 @@ describe("plugin detail route", () => {
     expect(screen.getByRole("button", { name: "Rescan" })).toBeTruthy();
     expect(screen.queryByText("Owner rescan")).toBeNull();
     expect(screen.queryByText("2/3 rescans left")).toBeNull();
+  });
+
+  it("renders ClawPack artifact details and uses the artifact download route", async () => {
+    loaderDataMock = {
+      detail: {
+        package: {
+          ...loaderDataMock.detail.package!,
+          latestVersion: "1.0.0",
+          artifact: {
+            kind: "npm-pack",
+            sha256: "a".repeat(64),
+            size: 2048,
+            format: "tgz",
+            npmIntegrity: "sha512-demo",
+            npmShasum: "b".repeat(40),
+            npmTarballName: "demo-plugin-1.0.0.tgz",
+            npmFileCount: 3,
+          },
+        },
+        owner: null,
+      },
+      version: {
+        package: {
+          name: "demo-plugin",
+          displayName: "Demo Plugin",
+          family: "code-plugin",
+        },
+        version: {
+          version: "1.0.0",
+          createdAt: 1,
+          changelog: "Initial release",
+          distTags: ["latest"],
+          files: [],
+          compatibility: null,
+          capabilities: null,
+          verification: null,
+          artifact: {
+            kind: "npm-pack",
+            sha256: "a".repeat(64),
+            size: 2048,
+            format: "tgz",
+            npmIntegrity: "sha512-demo",
+            npmShasum: "b".repeat(40),
+            npmTarballName: "demo-plugin-1.0.0.tgz",
+            npmFileCount: 3,
+          },
+          sha256hash: null,
+          vtAnalysis: null,
+          llmAnalysis: null,
+          staticScan: null,
+        },
+      },
+      readme: null,
+      rateLimited: null,
+    };
+    const route = await loadRoute();
+    const Component = route.__config.component as ComponentType;
+
+    render(<Component />);
+
+    expect(screen.getByText("ClawPack")).toBeTruthy();
+    expect(screen.getByText("demo-plugin-1.0.0.tgz")).toBeTruthy();
+    expect(screen.getByText("sha512-demo")).toBeTruthy();
+    expect(screen.getByText("openclaw plugins install clawhub:demo-plugin")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Download/i }).getAttribute("href")).toBe(
+      "/api/v1/packages/demo-plugin/versions/1.0.0/artifact/download",
+    );
+  });
+
+  it("labels legacy ZIP plugin artifacts as compatibility risk", async () => {
+    loaderDataMock = {
+      detail: {
+        package: {
+          ...loaderDataMock.detail.package!,
+          latestVersion: "1.0.0",
+          artifact: {
+            kind: "legacy-zip",
+            sha256: "a".repeat(64),
+            format: "zip",
+          },
+        },
+        owner: null,
+      },
+      version: {
+        package: {
+          name: "demo-plugin",
+          displayName: "Demo Plugin",
+          family: "code-plugin",
+        },
+        version: {
+          version: "1.0.0",
+          createdAt: 1,
+          changelog: "Initial release",
+          distTags: ["latest"],
+          files: [],
+          compatibility: null,
+          capabilities: null,
+          verification: null,
+          artifact: {
+            kind: "legacy-zip",
+            sha256: "a".repeat(64),
+            format: "zip",
+          },
+          sha256hash: null,
+          vtAnalysis: null,
+          llmAnalysis: null,
+          staticScan: null,
+        },
+      },
+      readme: null,
+      rateLimited: null,
+    };
+    const route = await loadRoute();
+    const Component = route.__config.component as ComponentType;
+
+    render(<Component />);
+
+    expect(screen.getByText("Legacy ZIP")).toBeTruthy();
+    expect(screen.getByText(/legacy ZIP path/i)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /Download/i }).getAttribute("href")).toBe(
+      "/api/v1/packages/demo-plugin/download?version=1.0.0",
+    );
   });
 
   it("shows a retryable empty state when the detail lookup is rate limited", async () => {

@@ -19,6 +19,7 @@ import { formatRetryDelay } from "../../lib/formatRetryDelay";
 import {
   fetchPackageDetail,
   fetchPackageReadme,
+  getPackageArtifactDownloadPath,
   fetchPackageVersion,
   getPackageDownloadPath,
   isRateLimitedPackageApiError,
@@ -175,6 +176,19 @@ function formatCapabilityValue(value: unknown): string {
   return JSON.stringify(value);
 }
 
+function formatArtifactSize(value: number | null | undefined): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  if (value < 1024) return `${value} B`;
+  const units = ["KB", "MB", "GB"] as const;
+  let size = value / 1024;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  return `${size >= 10 ? size.toFixed(0) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
 function isEmptyObject(obj: unknown): boolean {
   if (!obj || typeof obj !== "object") return true;
   return Object.keys(obj).length === 0;
@@ -240,12 +254,17 @@ function PluginDetailRoute() {
     pkg.family === "code-plugin"
       ? `openclaw plugins install clawhub:${pkg.name}`
       : pkg.family === "bundle-plugin"
-        ? `openclaw bundles install clawhub:${pkg.name}`
+        ? `openclaw plugins install clawhub:${pkg.name}`
         : `openclaw skills install ${pkg.name}`;
 
   const capabilities = latestRelease?.capabilities ?? pkg.capabilities;
   const compatibility = latestRelease?.compatibility ?? pkg.compatibility;
   const verification = latestRelease?.verification ?? pkg.verification;
+  const artifact = latestRelease?.artifact ?? pkg.artifact ?? null;
+  const downloadPath =
+    pkg.latestVersion && latestRelease?.version && artifact?.kind === "npm-pack"
+      ? getPackageArtifactDownloadPath(pkg.name, latestRelease.version)
+      : getPackageDownloadPath(pkg.name, pkg.latestVersion);
   const requestRescan = async () => {
     const packageId = (pkg as { _id?: Id<"packages"> })._id;
     if (!packageId) {
@@ -292,7 +311,7 @@ function PluginDetailRoute() {
                 {pkg.latestVersion && !isDownloadBlocked ? (
                   <div className="skill-title-actions">
                     <Button asChild variant="outline" size="sm" className="no-underline">
-                      <a href={getPackageDownloadPath(name, pkg.latestVersion)}>
+                      <a href={downloadPath}>
                         <Download className="h-3.5 w-3.5" aria-hidden="true" />
                         Download
                       </a>
@@ -385,6 +404,65 @@ function PluginDetailRoute() {
                 </div>
               </CardContent>
             </Card>
+            {artifact ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Artifact</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex flex-col gap-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge>{artifact.kind === "npm-pack" ? "ClawPack" : "Legacy ZIP"}</Badge>
+                      {artifact.kind === "npm-pack" ? (
+                        <span className="text-[color:var(--ink-soft)]">npm pack .tgz</span>
+                      ) : (
+                        <span className="text-[color:var(--ink-soft)]">
+                          Not upgraded to the latest OpenClaw plugin architecture.
+                        </span>
+                      )}
+                    </div>
+                    {artifact.kind === "legacy-zip" ? (
+                      <p className="text-sm text-[color:var(--ink-soft)]">
+                        This plugin uses the legacy ZIP path and may have compatibility issues until
+                        the publisher uploads a ClawPack.
+                      </p>
+                    ) : null}
+                    {artifact.kind === "npm-pack" ? (
+                      <dl className="grid gap-2 sm:grid-cols-[minmax(120px,160px)_1fr]">
+                        {artifact.npmTarballName ? (
+                          <>
+                            <dt className="font-semibold text-[color:var(--ink-soft)]">Tarball</dt>
+                            <dd className="break-all font-mono text-xs">{artifact.npmTarballName}</dd>
+                          </>
+                        ) : null}
+                        {formatArtifactSize(artifact.size) ? (
+                          <>
+                            <dt className="font-semibold text-[color:var(--ink-soft)]">Size</dt>
+                            <dd>{formatArtifactSize(artifact.size)}</dd>
+                          </>
+                        ) : null}
+                        {typeof artifact.npmFileCount === "number" ? (
+                          <>
+                            <dt className="font-semibold text-[color:var(--ink-soft)]">Files</dt>
+                            <dd>{artifact.npmFileCount}</dd>
+                          </>
+                        ) : null}
+                        {artifact.npmIntegrity ? (
+                          <>
+                            <dt className="font-semibold text-[color:var(--ink-soft)]">
+                              Integrity
+                            </dt>
+                            <dd className="break-all font-mono text-xs">
+                              {artifact.npmIntegrity}
+                            </dd>
+                          </>
+                        ) : null}
+                      </dl>
+                    ) : null}
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
           </div>
 
           {readme ? (
