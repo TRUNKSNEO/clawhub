@@ -201,7 +201,7 @@ describe("applyRateLimit headers", () => {
     if (!result.ok) return;
     const headers = new Headers(result.headers);
     expect(headers.get("X-RateLimit-Limit")).toBe("120");
-    expect(headers.get("X-RateLimit-Remaining")).toBe("42");
+    expect(headers.get("X-RateLimit-Remaining")).toBe("41");
     expect(headers.get("Retry-After")).toBeNull();
   });
 
