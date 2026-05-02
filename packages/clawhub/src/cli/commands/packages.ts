@@ -3,6 +3,7 @@ import { basename, join, relative, resolve, sep } from "node:path";
 import ignore from "ignore";
 import mime from "mime";
 import semver from "semver";
+import { parseClawPack } from "../../clawpack.js";
 import { apiRequest, apiRequestForm, fetchText, registryUrl } from "../../http.js";
 import {
   ApiRoutes,
@@ -15,6 +16,7 @@ import {
   ApiV1PackageVersionResponseSchema,
   ApiV1PublishTokenMintResponseSchema,
   normalizeOpenClawExternalPluginCompatibility,
+  type PackageArtifactSummary,
   type PackageCapabilitySummary,
   type PackageCompatibility,
   type PackageFamily,
@@ -127,6 +129,7 @@ type PackagePublishPlan = {
   folder: string;
   cleanup?: () => Promise<void>;
   filesOnDisk: PackageFile[];
+  clawpackOnDisk?: PackageFile;
   payload: PackagePublishPayload;
   compatibility?: PackageCompatibility;
   sourceLabel: string;
@@ -315,10 +318,12 @@ export async function cmdInspectPackage(
       );
       printCapabilities(versionResult.version.capabilities ?? detail.package.capabilities ?? null);
       printVerification(versionResult.version.verification ?? detail.package.verification ?? null);
+      printArtifact(versionResult.version.artifact ?? detail.package.artifact ?? null);
     } else if (shouldPrintMeta) {
       printCompatibility(detail.package.compatibility ?? null);
       printCapabilities(detail.package.capabilities ?? null);
       printVerification(detail.package.verification ?? null);
+      printArtifact(detail.package.artifact ?? null);
     }
 
     if (versionsList?.items) {
@@ -499,16 +504,24 @@ export async function cmdPublishPackage(
       const form = new FormData();
       form.set("payload", JSON.stringify(plan.payload));
 
-      let index = 0;
-      for (const file of plan.filesOnDisk) {
-        index += 1;
-        if (spinner) {
-          spinner.text = `Uploading ${file.relPath} (${index}/${plan.filesOnDisk.length})`;
-        }
-        const blob = new Blob([Buffer.from(file.bytes)], {
-          type: file.contentType ?? "application/octet-stream",
+      if (plan.clawpackOnDisk) {
+        if (spinner) spinner.text = `Uploading ${plan.clawpackOnDisk.relPath}`;
+        const blob = new Blob([Buffer.from(plan.clawpackOnDisk.bytes)], {
+          type: "application/octet-stream",
         });
-        form.append("files", blob, file.relPath);
+        form.append("clawpack", blob, plan.clawpackOnDisk.relPath);
+      } else {
+        let index = 0;
+        for (const file of plan.filesOnDisk) {
+          index += 1;
+          if (spinner) {
+            spinner.text = `Uploading ${file.relPath} (${index}/${plan.filesOnDisk.length})`;
+          }
+          const blob = new Blob([Buffer.from(file.bytes)], {
+            type: file.contentType ?? "application/octet-stream",
+          });
+          form.append("files", blob, file.relPath);
+        }
       }
 
       if (spinner) spinner.text = `Publishing ${plan.payload.name}@${plan.payload.version}`;
@@ -633,6 +646,7 @@ function printPackageSummary(detail: PackageResponse) {
   console.log(`Created: ${formatTimestamp(pkg.createdAt)}`);
   console.log(`Updated: ${formatTimestamp(pkg.updatedAt)}`);
   if (pkg.latestVersion) console.log(`Latest: ${pkg.latestVersion}`);
+  printArtifact(pkg.artifact ?? null);
   const tags = Object.entries(normalizeTags(pkg.tags));
   if (tags.length > 0) {
     console.log(`Tags: ${tags.map(([tag, version]) => `${tag}=${version}`).join(", ")}`);
@@ -700,6 +714,28 @@ function printVerification(verification: PackageVerificationSummary | null | und
   if (verification.sourceCommit) console.log(`Source Commit: ${verification.sourceCommit}`);
   if (verification.sourceTag) console.log(`Source Ref: ${verification.sourceTag}`);
   if (verification.scanStatus) console.log(`Scan: ${verification.scanStatus}`);
+}
+
+function printArtifact(artifact: PackageArtifactSummary | null | undefined) {
+  if (!artifact || typeof artifact !== "object") return;
+  const summary = artifact as {
+    kind?: string;
+    sha256?: string;
+    size?: number;
+    format?: string;
+    npmIntegrity?: string;
+    npmShasum?: string;
+    npmTarballName?: string;
+  };
+  if (!summary.kind) return;
+  console.log(`Artifact: ${summary.kind}${summary.format ? ` (${summary.format})` : ""}`);
+  if (summary.sha256) console.log(`Artifact SHA-256: ${summary.sha256}`);
+  if (typeof summary.size === "number") {
+    console.log(`Artifact Size: ${formatByteCount(summary.size)}`);
+  }
+  if (summary.npmIntegrity) console.log(`npm integrity: ${summary.npmIntegrity}`);
+  if (summary.npmShasum) console.log(`npm shasum: ${summary.npmShasum}`);
+  if (summary.npmTarballName) console.log(`npm tarball: ${summary.npmTarballName}`);
 }
 
 function normalizeTags(tags: unknown): Record<string, string> {
@@ -819,6 +855,8 @@ async function preparePackagePublishPlan(
   let folder = sourceForFetch.kind === "local" ? sourceForFetch.path : "";
   let cleanup: (() => Promise<void>) | undefined;
   let inferredSource: InferredPublishSource | undefined;
+  let clawpackOnDisk: PackageFile | undefined;
+  let parsedClawpack: ReturnType<typeof parseClawPack> | undefined;
 
   if (sourceForFetch.kind === "github") {
     const fetchSpinner = options.json
@@ -836,9 +874,21 @@ async function preparePackagePublishPlan(
     }
   } else {
     const folderStat = await stat(folder).catch(() => null);
-    if (!folderStat || !folderStat.isDirectory()) fail("Path must be a folder");
+    if (!folderStat) fail("Path must be a folder or ClawPack .tgz");
+    if (folderStat.isFile()) {
+      if (!folder.endsWith(".tgz")) fail("ClawPack publish files must end in .tgz");
+      const bytes = new Uint8Array(await readFile(folder));
+      parsedClawpack = parseClawPack(bytes);
+      clawpackOnDisk = {
+        relPath: basename(folder),
+        bytes,
+        contentType: "application/octet-stream",
+      };
+    } else if (!folderStat.isDirectory()) {
+      fail("Path must be a folder or ClawPack .tgz");
+    }
 
-    const localGitInfo = resolveLocalGitInfo(folder);
+    const localGitInfo = folderStat.isDirectory() ? resolveLocalGitInfo(folder) : null;
     if (localGitInfo) {
       inferredSource = {
         repo: localGitInfo.repo,
@@ -850,16 +900,28 @@ async function preparePackagePublishPlan(
     }
   }
 
-  const filesOnDisk = await listPackageFiles(folder);
+  const filesOnDisk = parsedClawpack
+    ? parsedClawpack.entries.map((entry) => ({
+        relPath: entry.path,
+        bytes: entry.bytes,
+        contentType: mime.getType(entry.path) ?? "application/octet-stream",
+      }))
+    : await listPackageFiles(folder);
   if (filesOnDisk.length === 0) fail("No files found");
 
   const fileSet = new Set(filesOnDisk.map((file) => file.relPath.toLowerCase()));
-  const packageJson = await readJsonFile(join(folder, "package.json"));
-  const pluginManifest = await readJsonFile(join(folder, "openclaw.plugin.json"));
-  const bundleManifest = await readJsonFile(join(folder, "openclaw.bundle.json"));
+  const packageJson =
+    parsedClawpack?.packageJson ?? (await readJsonFile(join(folder, "package.json")));
+  const pluginManifest =
+    readJsonEntry(filesOnDisk, "openclaw.plugin.json") ??
+    (parsedClawpack ? null : await readJsonFile(join(folder, "openclaw.plugin.json")));
+  const bundleManifest =
+    readJsonEntry(filesOnDisk, "openclaw.bundle.json") ??
+    (parsedClawpack ? null : await readJsonFile(join(folder, "openclaw.bundle.json")));
   const family = detectPackageFamily(fileSet, options.family);
   const name =
     options.name?.trim() ||
+    parsedClawpack?.packageName ||
     packageJsonString(packageJson, "name") ||
     packageJsonString(pluginManifest, "id") ||
     packageJsonString(bundleManifest, "id") ||
@@ -871,7 +933,10 @@ async function preparePackagePublishPlan(
     packageJsonString(bundleManifest, "name") ||
     titleCase(basename(folder));
   const ownerHandle = options.owner?.trim().replace(/^@+/, "");
-  const version = options.version?.trim() || packageJsonString(packageJson, "version");
+  const version =
+    options.version?.trim() ||
+    parsedClawpack?.packageVersion ||
+    packageJsonString(packageJson, "version");
   const changelog = options.changelog ?? "";
   const tags = parseTags(options.tags ?? "latest");
   const source = buildSource(options, inferredSource);
@@ -925,6 +990,7 @@ async function preparePackagePublishPlan(
     folder,
     cleanup,
     filesOnDisk,
+    clawpackOnDisk,
     payload,
     compatibility:
       family === "code-plugin"
@@ -939,9 +1005,24 @@ async function preparePackagePublishPlan(
       version,
       ...(source?.commit ? { commit: source.commit } : {}),
       files: filesOnDisk.length,
-      totalBytes: filesOnDisk.reduce((sum, file) => sum + file.bytes.byteLength, 0),
+      totalBytes: clawpackOnDisk
+        ? clawpackOnDisk.bytes.byteLength
+        : filesOnDisk.reduce((sum, file) => sum + file.bytes.byteLength, 0),
     },
   };
+}
+
+function readJsonEntry(files: PackageFile[], path: string) {
+  const file = files.find((entry) => entry.relPath.toLowerCase() === path.toLowerCase());
+  if (!file) return null;
+  try {
+    const parsed = JSON.parse(new TextDecoder().decode(file.bytes)) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 function hasGitHubActionsOidcEnv(env: NodeJS.ProcessEnv = process.env) {
