@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import ignore from "ignore";
@@ -63,6 +64,7 @@ const DOT_DIR = ".clawhub";
 const LEGACY_DOT_DIR = ".clawdhub";
 const DOT_IGNORE = ".clawhubignore";
 const LEGACY_DOT_IGNORE = ".clawdhubignore";
+const MAX_CLAWPACK_BYTES = 120 * 1024 * 1024;
 
 type PackageInspectOptions = {
   version?: string;
@@ -111,6 +113,11 @@ type PackagePublishOptions = {
   sourceRef?: string;
   sourcePath?: string;
   dryRun?: boolean;
+  json?: boolean;
+};
+
+type PackagePackOptions = {
+  packDestination?: string;
   json?: boolean;
 };
 
@@ -627,6 +634,90 @@ export async function cmdDeletePackageTrustedPublisher(
     console.log(`Trusted publisher deleted for ${trimmed}.`);
   } catch (error) {
     spinner.fail(formatError(error));
+    throw error;
+  }
+}
+
+export async function cmdPackPackage(
+  opts: GlobalOpts,
+  sourceArg: string,
+  options: PackagePackOptions = {},
+) {
+  if (!sourceArg?.trim()) fail("Path required");
+  const sourcePath = resolve(opts.workdir, sourceArg);
+  const sourceStat = await stat(sourcePath).catch(() => null);
+  if (!sourceStat?.isDirectory()) fail("Path must be a package folder");
+
+  const packageJson = await readJsonFile(join(sourcePath, "package.json"));
+  if (!packageJson) fail("package.json required");
+  const pluginManifest = await readJsonFile(join(sourcePath, "openclaw.plugin.json"));
+  if (!pluginManifest) fail("openclaw.plugin.json required");
+
+  const packageName = packageJsonString(packageJson, "name");
+  const packageVersion = packageJsonString(packageJson, "version");
+  if (!packageName) fail("package.json name required");
+  if (!packageVersion) fail("package.json version required");
+  if (!semver.valid(packageVersion)) fail("package.json version must be valid semver");
+
+  const validation = validateOpenClawExternalCodePluginPackageJson(packageJson);
+  if (validation.issues.length > 0) {
+    fail(validation.issues.map((issue) => issue.message).join(" "));
+  }
+
+  const packDestination = resolve(opts.workdir, options.packDestination ?? ".");
+  await mkdir(packDestination, { recursive: true });
+
+  const spinner = options.json ? null : createSpinner(`Packing ${packageName}@${packageVersion}`);
+  try {
+    const result = spawnSync(
+      "npm",
+      ["pack", sourcePath, "--json", "--ignore-scripts", "--pack-destination", packDestination],
+      {
+        cwd: opts.workdir,
+        encoding: "utf8",
+      },
+    );
+    if (result.error) throw result.error;
+    if (result.status !== 0) {
+      fail((result.stderr || result.stdout || "npm pack failed").trim());
+    }
+
+    let npmOutput: Array<{ filename?: string }> = [];
+    try {
+      npmOutput = JSON.parse(result.stdout) as Array<{ filename?: string }>;
+    } catch {
+      fail("npm pack did not return JSON output");
+    }
+    const filename = npmOutput[0]?.filename;
+    if (!filename) fail("npm pack did not return a tarball filename");
+
+    const packPath = resolve(packDestination, filename);
+    const bytes = new Uint8Array(await readFile(packPath));
+    assertClawPackSize(bytes.byteLength, basename(packPath));
+    const parsed = parseClawPack(bytes);
+    const identity = computeArtifactIdentity(bytes);
+    const output = {
+      path: packPath,
+      name: parsed.packageName,
+      version: parsed.packageVersion,
+      size: bytes.byteLength,
+      files: parsed.entries.length,
+      sha256: identity.sha256,
+      npmIntegrity: identity.npmIntegrity,
+      npmShasum: identity.npmShasum,
+    };
+
+    spinner?.succeed(`Packed ${parsed.packageName}@${parsed.packageVersion} -> ${packPath}`);
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);
+    } else {
+      console.log(`Path: ${packPath}`);
+      console.log(`Size: ${bytes.byteLength} bytes`);
+      console.log(`SHA-256: ${identity.sha256}`);
+      console.log(`npm integrity: ${identity.npmIntegrity}`);
+    }
+  } catch (error) {
+    spinner?.fail(formatError(error));
     throw error;
   }
 }
@@ -1906,6 +1997,12 @@ function packageJsonString(value: Record<string, unknown> | null, key: string): 
   return typeof candidate === "string" && candidate.trim() ? candidate.trim() : undefined;
 }
 
+function assertClawPackSize(size: number, label: string) {
+  if (size > MAX_CLAWPACK_BYTES) {
+    fail(`ClawPack "${label}" exceeds 120MB limit`);
+  }
+}
+
 const REAL_BUNDLE_MANIFESTS = [
   { path: ".codex-plugin/plugin.json", format: "codex" },
   { path: ".claude-plugin/plugin.json", format: "claude" },
@@ -2009,6 +2106,7 @@ async function preparePackagePublishPlan(
     if (folderStat.isFile()) {
       if (!folder.endsWith(".tgz")) fail("ClawPack publish files must end in .tgz");
       const bytes = new Uint8Array(await readFile(folder));
+      assertClawPackSize(bytes.byteLength, basename(folder));
       parsedClawpack = parseClawPack(bytes);
       clawpackOnDisk = {
         relPath: basename(folder),

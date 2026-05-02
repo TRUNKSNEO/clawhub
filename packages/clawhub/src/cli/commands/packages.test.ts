@@ -43,6 +43,7 @@ const {
   cmdPackageModerationQueue,
   cmdPackageMigrationStatus,
   cmdPackageReadiness,
+  cmdPackPackage,
   cmdPublishPackage,
   cmdReportPackage,
   cmdResolvePackageAppeal,
@@ -51,6 +52,7 @@ const {
   cmdUpsertPackageMigration,
   cmdVerifyPackage,
 } = await import("./packages");
+const { parseClawPack } = await import("../../clawpack");
 
 const mockLog = vi.spyOn(console, "log").mockImplementation(() => {});
 const mockWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
@@ -1125,6 +1127,47 @@ describe("package commands", () => {
         "OK. Published @scope/demo-plugin@1.0.0 (rel_1)",
       );
       dateSpy.mockRestore();
+    } finally {
+      await rm(workdir, { recursive: true, force: true });
+    }
+  });
+
+  it("packs a plugin folder through npm pack and validates the ClawPack", async () => {
+    const workdir = await makeTmpWorkdir();
+    try {
+      const folder = join(workdir, "demo-plugin");
+      await mkdir(join(folder, "dist"), { recursive: true });
+      await mkdir(join(workdir, "packs"), { recursive: true });
+      await writeFile(
+        join(folder, "package.json"),
+        makeCodePluginPackageJson({
+          name: "@scope/demo-plugin",
+          displayName: "Demo Plugin",
+          version: "1.0.0",
+          description: "Demo plugin",
+        }),
+        "utf8",
+      );
+      await writeFile(
+        join(folder, "openclaw.plugin.json"),
+        JSON.stringify({ id: "demo.plugin" }),
+        "utf8",
+      );
+      await writeFile(join(folder, "dist", "index.js"), "export const demo = true;\n", "utf8");
+
+      await cmdPackPackage(makeOpts(workdir), "demo-plugin", {
+        packDestination: "packs",
+      });
+
+      const packPath = join(workdir, "packs", "scope-demo-plugin-1.0.0.tgz");
+      const parsed = parseClawPack(new Uint8Array(await readFile(packPath)));
+      expect(parsed.packageName).toBe("@scope/demo-plugin");
+      expect(parsed.packageVersion).toBe("1.0.0");
+      expect(parsed.entries.map((entry) => entry.path)).toContain("openclaw.plugin.json");
+      expect(mockLog).toHaveBeenCalledWith(`Path: ${packPath}`);
+      expect(uiMocks.spinner.succeed).toHaveBeenCalledWith(
+        `Packed @scope/demo-plugin@1.0.0 -> ${packPath}`,
+      );
     } finally {
       await rm(workdir, { recursive: true, force: true });
     }

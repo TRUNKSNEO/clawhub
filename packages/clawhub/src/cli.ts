@@ -31,6 +31,7 @@ import {
   cmdPackageModerationQueue,
   cmdPackageMigrationStatus,
   cmdPackageReadiness,
+  cmdPackPackage,
   cmdPublishPackage,
   cmdReportPackage,
   cmdResolvePackageAppeal,
@@ -660,6 +661,17 @@ packageCmd
   .action(async (bundledPluginId, options) => {
     const opts = await resolveGlobalOpts();
     await cmdUpsertPackageMigration(opts, bundledPluginId, options);
+  });
+
+packageCmd
+  .command("pack")
+  .description("Create a ClawPack npm tarball from a plugin package folder")
+  .argument("<source>", "Package folder path")
+  .option("--pack-destination <dir>", "Directory for the generated .tgz (default: workdir)")
+  .option("--json", "Output JSON")
+  .action(async (source, options) => {
+    const opts = await resolveGlobalOpts();
+    await cmdPackPackage(opts, source, options);
   });
 
 packageCmd
