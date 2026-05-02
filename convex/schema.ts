@@ -914,6 +914,15 @@ const packageReleases = defineTable({
   .index("by_package_version", ["packageId", "version"])
   .index("by_sha256hash", ["sha256hash"]);
 
+const packageStatEvents = defineTable({
+  packageId: v.id("packages"),
+  kind: v.literal("download"),
+  occurredAt: v.number(),
+  processedAt: v.optional(v.number()),
+})
+  .index("by_unprocessed", ["processedAt"])
+  .index("by_package", ["packageId"]);
+
 const packageTrustedPublishers = defineTable({
   packageId: v.id("packages"),
   provider: v.literal("github-actions"),
@@ -1453,11 +1462,13 @@ const apiTokens = defineTable({
 const rateLimits = defineTable({
   key: v.string(),
   windowStart: v.number(),
+  shard: v.optional(v.number()),
   count: v.number(),
   limit: v.number(),
   updatedAt: v.number(),
 })
   .index("by_key_window", ["key", "windowStart"])
+  .index("by_key_window_shard", ["key", "windowStart", "shard"])
   .index("by_key", ["key"]);
 
 const downloadDedupes = defineTable({
@@ -1571,6 +1582,7 @@ export default defineSchema({
   skillSlugAliases,
   packages,
   packageReleases,
+  packageStatEvents,
   packageTrustedPublishers,
   packagePublishTokens,
   packageBadges,

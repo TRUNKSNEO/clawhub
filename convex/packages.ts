@@ -1911,16 +1911,58 @@ export const getPackageByNameInternal = internalQuery({
 export const recordPackageDownloadInternal = internalMutation({
   args: { packageId: v.id("packages") },
   handler: async (ctx, args) => {
-    const pkg = await ctx.db.get(args.packageId);
-    if (!pkg) return;
-    await ctx.db.patch(pkg._id, {
-      stats: {
-        downloads: (pkg.stats?.downloads ?? 0) + 1,
-        installs: pkg.stats?.installs ?? 0,
-        stars: pkg.stats?.stars ?? 0,
-        versions: pkg.stats?.versions ?? 0,
-      },
+    await ctx.db.insert("packageStatEvents", {
+      packageId: args.packageId,
+      kind: "download",
+      occurredAt: Date.now(),
+      processedAt: undefined,
     });
+  },
+});
+
+export const processPackageStatEventsInternal = internalMutation({
+  args: { batchSize: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const batchSize = Math.max(1, Math.min(args.batchSize ?? 500, 1_000));
+    const now = Date.now();
+    const events = await ctx.db
+      .query("packageStatEvents")
+      .withIndex("by_unprocessed", (q) => q.eq("processedAt", undefined))
+      .take(batchSize);
+
+    if (events.length === 0) return { processed: 0, packagesUpdated: 0 };
+
+    const downloadsByPackage = new Map<Id<"packages">, number>();
+    for (const event of events) {
+      downloadsByPackage.set(event.packageId, (downloadsByPackage.get(event.packageId) ?? 0) + 1);
+    }
+
+    let packagesUpdated = 0;
+    for (const [packageId, downloads] of downloadsByPackage) {
+      const pkg = await ctx.db.get(packageId);
+      if (!pkg) continue;
+      await ctx.db.patch(pkg._id, {
+        stats: {
+          downloads: (pkg.stats?.downloads ?? 0) + downloads,
+          installs: pkg.stats?.installs ?? 0,
+          stars: pkg.stats?.stars ?? 0,
+          versions: pkg.stats?.versions ?? 0,
+        },
+      });
+      packagesUpdated += 1;
+    }
+
+    for (const event of events) {
+      await ctx.db.patch(event._id, { processedAt: now });
+    }
+
+    if (events.length === batchSize) {
+      await ctx.scheduler.runAfter(0, internal.packages.processPackageStatEventsInternal, {
+        batchSize,
+      });
+    }
+
+    return { processed: events.length, packagesUpdated };
   },
 });
 

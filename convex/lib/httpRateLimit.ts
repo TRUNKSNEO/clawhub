@@ -4,6 +4,7 @@ import { getOptionalApiTokenUserId } from "./apiTokenAuth";
 import { corsHeaders, mergeHeaders } from "./httpHeaders";
 
 const RATE_LIMIT_WINDOW_MS = 60_000;
+const RATE_LIMIT_SHARDS = 16;
 export const RATE_LIMITS = {
   read: { ip: 600, key: 2400 },
   write: { ip: 45, key: 180 },
@@ -147,6 +148,7 @@ async function checkRateLimit(
       key,
       limit,
       windowMs: RATE_LIMIT_WINDOW_MS,
+      shard: Math.floor(Math.random() * RATE_LIMIT_SHARDS),
     })) as { allowed: boolean; remaining: number };
   } catch (error) {
     if (isRateLimitWriteConflict(error)) {
@@ -162,7 +164,7 @@ async function checkRateLimit(
 
   return {
     allowed: result.allowed,
-    remaining: result.remaining,
+    remaining: Math.max(0, status.remaining - 1),
     limit: status.limit,
     resetAt: status.resetAt,
   };
