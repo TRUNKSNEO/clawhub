@@ -44,6 +44,10 @@ See also: [acceptable-usage.md](./acceptable-usage.md) for the marketplace polic
 - Package reports can be moved to `triaged` or `dismissed` with a moderator
   note. Only `open` reports count toward `packages.reportCount` and user active
   report limits; triaging a report decrements the open count.
+- Package owners and publisher members can read package moderation status via
+  API/CLI, including open report count, latest release moderation state, and
+  download-block reasons. Reporter identities and report bodies remain staff
+  intake data.
 - Public queries hide non-active moderation statuses; staff can still access via
   staff-only queries and unhide/restore/delete/ban.
 - Skills directory supports an optional "Hide suspicious" filter to exclude

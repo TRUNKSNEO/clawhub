@@ -1,5 +1,6 @@
 import {
   PackageArtifactBackfillRequestSchema,
+  ApiV1PackageModerationStatusResponseSchema,
   PackageReportRequestSchema,
   PackageReportTriageRequestSchema,
   PackageReleaseModerationRequestSchema,
@@ -76,6 +77,7 @@ const internalRefs = internal as unknown as {
     reportPackageForUserInternal: unknown;
     listPackageReportsInternal: unknown;
     triagePackageReportForUserInternal: unknown;
+    getPackageModerationStatusForUserInternal: unknown;
     backfillPackageArtifactKindsInternal: unknown;
     listPackageModerationQueueInternal: unknown;
   };
@@ -1900,6 +1902,36 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
       status,
     });
     return json(result, 200, rate.headers);
+  }
+
+  if (segments[1] === "moderation" && segments.length === 2) {
+    const rate = await applyRateLimit(ctx, request, "read");
+    if (!rate.ok) return rate.response;
+    const auth = await requireApiTokenUserOrResponse(ctx, request, rate.headers);
+    if (!auth.ok) return auth.response;
+
+    try {
+      const result = await runQueryRef(
+        ctx,
+        internalRefs.packages.getPackageModerationStatusForUserInternal,
+        {
+          actorUserId: auth.userId,
+          name: segments[0]!,
+        },
+      );
+      const parsed = parseArk(
+        ApiV1PackageModerationStatusResponseSchema,
+        result,
+        "Package moderation status response",
+      );
+      return json(parsed, 200, rate.headers);
+    } catch (error) {
+      return text(
+        error instanceof Error ? error.message : "Package moderation status failed",
+        400,
+        rate.headers,
+      );
+    }
   }
 
   const rateKind =

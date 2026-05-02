@@ -12,6 +12,7 @@ import {
   publishPackageForTrustedPublisherInternal,
   publishPackageForUserInternal,
   listPackageReportsInternal,
+  getPackageModerationStatusForUserInternal,
   reportPackageForUserInternal,
   triagePackageReportForUserInternal,
   getVersionByName,
@@ -274,6 +275,18 @@ const triagePackageReportForUserInternalHandler = (
       packageId: string;
       status: string;
       reportCount: number;
+    }
+  >
+)._handler;
+const getPackageModerationStatusForUserInternalHandler = (
+  getPackageModerationStatusForUserInternal as unknown as WrappedHandler<
+    {
+      actorUserId: string;
+      name: string;
+    },
+    {
+      package: { name: string; reportCount: number };
+      latestRelease: { version: string; scanStatus: string; blockedFromDownload: boolean } | null;
     }
   >
 )._handler;
@@ -3641,6 +3654,62 @@ describe("packages public queries", () => {
         targetType: "packageReport",
       }),
     );
+  });
+
+  it("returns package moderation status to package owners", async () => {
+    const result = await getPackageModerationStatusForUserInternalHandler(
+      {
+        db: {
+          get: vi.fn(async (id: string) => {
+            if (id === "users:owner") return { _id: id, role: "user" };
+            if (id === "packageReleases:demo-1") {
+              return makeReleaseDoc({
+                _id: "packageReleases:demo-1",
+                version: "1.2.3",
+                artifactKind: "npm-pack",
+                manualModeration: {
+                  state: "quarantined",
+                  reason: "manual review",
+                  reviewerUserId: "users:moderator",
+                  updatedAt: 2,
+                },
+              });
+            }
+            return null;
+          }),
+          query: vi.fn((table: string) => {
+            if (table !== "packages") throw new Error(`Unexpected table ${table}`);
+            return {
+              withIndex: vi.fn(() => ({
+                unique: vi.fn().mockResolvedValue(
+                  makePackageDoc({
+                    name: "@scope/demo",
+                    ownerUserId: "users:owner",
+                    reportCount: 2,
+                    lastReportedAt: 456,
+                  }),
+                ),
+              })),
+            };
+          }),
+        },
+      } as never,
+      { actorUserId: "users:owner", name: "@scope/demo" },
+    );
+
+    expect(result).toMatchObject({
+      package: {
+        name: "@scope/demo",
+        reportCount: 2,
+      },
+      latestRelease: {
+        version: "1.2.3",
+        scanStatus: "malicious",
+        moderationState: "quarantined",
+        blockedFromDownload: true,
+        reasons: ["manual:quarantined", "scan:malicious", "reports:2"],
+      },
+    });
   });
 });
 

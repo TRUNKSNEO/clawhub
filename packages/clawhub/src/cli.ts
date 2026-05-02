@@ -24,6 +24,7 @@ import {
   cmdDeletePackageTrustedPublisher,
   cmdListPackageReports,
   cmdModeratePackageRelease,
+  cmdPackageModerationStatus,
   cmdPackageModerationQueue,
   cmdPackageReadiness,
   cmdPublishPackage,
@@ -506,6 +507,16 @@ packageCmd
   .action(async (reportId, options) => {
     const opts = await resolveGlobalOpts();
     await cmdTriagePackageReport(opts, reportId, options);
+  });
+
+packageCmd
+  .command("moderation-status")
+  .description("Show owner/staff package moderation status")
+  .argument("<name>", "Package name")
+  .option("--json", "Output JSON")
+  .action(async (name, options) => {
+    const opts = await resolveGlobalOpts();
+    await cmdPackageModerationStatus(opts, name, options);
   });
 
 packageCmd

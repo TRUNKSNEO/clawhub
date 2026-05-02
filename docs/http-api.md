@@ -567,6 +567,44 @@ Response:
 }
 ```
 
+### `GET /api/v1/packages/{name}/moderation`
+
+Owner/staff endpoint for package moderation visibility.
+
+Auth:
+
+- Requires an API token for the package owner, publisher member, moderator, or
+  admin user.
+
+Response:
+
+```json
+{
+  "package": {
+    "packageId": "packages:...",
+    "name": "@openclaw/example-plugin",
+    "displayName": "Example Plugin",
+    "family": "code-plugin",
+    "channel": "community",
+    "isOfficial": false,
+    "reportCount": 2,
+    "lastReportedAt": 1730000001000,
+    "scanStatus": "malicious"
+  },
+  "latestRelease": {
+    "releaseId": "packageReleases:...",
+    "version": "1.2.3",
+    "artifactKind": "npm-pack",
+    "scanStatus": "malicious",
+    "moderationState": "quarantined",
+    "moderationReason": "manual review",
+    "blockedFromDownload": true,
+    "reasons": ["manual:quarantined", "scan:malicious", "reports:2"],
+    "createdAt": 1730000000000
+  }
+}
+```
+
 ### `POST /api/v1/packages/reports/{reportId}/triage`
 
 Moderator/admin endpoint for resolving or reopening package reports.

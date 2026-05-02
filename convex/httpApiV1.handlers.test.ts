@@ -3980,6 +3980,61 @@ describe("httpApiV1 handlers", () => {
     });
   });
 
+  it("package moderation status returns owner diagnostics", async () => {
+    vi.mocked(requireApiTokenUser).mockResolvedValue({
+      userId: "users:owner",
+      user: { _id: "users:owner", role: "user" },
+    } as never);
+    const runQuery = vi.fn(async (_query: unknown, args: Record<string, unknown>) => {
+      if (isRateLimitArgs(args)) return okRate();
+      return {
+        package: {
+          packageId: "packages:1",
+          name: "@scope/demo",
+          displayName: "Demo",
+          family: "code-plugin",
+          channel: "community",
+          isOfficial: false,
+          reportCount: 2,
+          lastReportedAt: 456,
+          scanStatus: "malicious",
+        },
+        latestRelease: {
+          releaseId: "packageReleases:1",
+          version: "1.2.3",
+          artifactKind: "npm-pack",
+          scanStatus: "malicious",
+          moderationState: "quarantined",
+          moderationReason: "manual review",
+          blockedFromDownload: true,
+          reasons: ["manual:quarantined", "scan:malicious", "reports:2"],
+          createdAt: 123,
+        },
+      };
+    });
+    const runMutation = vi.fn().mockResolvedValue(okRate());
+
+    const response = await __handlers.packagesGetRouterV1Handler(
+      makeCtx({ runQuery, runMutation }),
+      new Request("https://example.com/api/v1/packages/%40scope%2Fdemo/moderation", {
+        headers: { Authorization: "Bearer clh_test" },
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      package: { name: "@scope/demo", reportCount: 2 },
+      latestRelease: { blockedFromDownload: true },
+    });
+    expect(runQuery).toHaveBeenCalledWith(
+      internal.packages.getPackageModerationStatusForUserInternal,
+      {
+        actorUserId: "users:owner",
+        name: "@scope/demo",
+      },
+    );
+  });
+
   it("package artifact backfill posts admin dry-run requests", async () => {
     vi.mocked(requireApiTokenUser).mockResolvedValue({
       userId: "users:admin",

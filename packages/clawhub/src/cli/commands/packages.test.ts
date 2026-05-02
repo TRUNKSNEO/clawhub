@@ -36,6 +36,7 @@ const {
   cmdBackfillPackageArtifacts,
   cmdListPackageReports,
   cmdModeratePackageRelease,
+  cmdPackageModerationStatus,
   cmdPackageModerationQueue,
   cmdPackageReadiness,
   cmdPublishPackage,
@@ -576,6 +577,47 @@ describe("package commands", () => {
       expect.anything(),
     );
     expect(mockLog).toHaveBeenCalledWith("OK. Report packageReports:1 set to triaged.");
+  });
+
+  it("shows package moderation status", async () => {
+    httpMocks.apiRequest.mockResolvedValueOnce({
+      package: {
+        packageId: "pkg_1",
+        name: "@scope/demo",
+        displayName: "Demo",
+        family: "code-plugin",
+        channel: "community",
+        isOfficial: false,
+        reportCount: 2,
+        lastReportedAt: 456,
+        scanStatus: "malicious",
+      },
+      latestRelease: {
+        releaseId: "rel_1",
+        version: "1.2.3",
+        artifactKind: "npm-pack",
+        scanStatus: "malicious",
+        moderationState: "quarantined",
+        moderationReason: "manual review",
+        blockedFromDownload: true,
+        reasons: ["manual:quarantined", "scan:malicious", "reports:2"],
+        createdAt: 123,
+      },
+    });
+
+    await cmdPackageModerationStatus(makeOpts(), "@scope/demo");
+
+    expect(httpMocks.apiRequest).toHaveBeenCalledWith(
+      "https://clawhub.ai",
+      {
+        method: "GET",
+        path: "/api/v1/packages/%40scope%2Fdemo/moderation",
+        token: "tkn",
+      },
+      expect.anything(),
+    );
+    expect(mockLog).toHaveBeenCalledWith("@scope/demo moderation");
+    expect(mockLog).toHaveBeenCalledWith("  blocked: yes");
   });
 
   it("lists the package moderation queue", async () => {

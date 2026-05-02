@@ -298,6 +298,30 @@ export const ApiV1PackageReportTriageResponseSchema = type({
     status: PackageReportStatusSchema,
     reportCount: "number",
 });
+export const ApiV1PackageModerationStatusResponseSchema = type({
+    package: type({
+        packageId: "string",
+        name: "string",
+        displayName: "string",
+        family: PackageFamilySchema,
+        channel: PackageChannelSchema,
+        isOfficial: "boolean",
+        reportCount: "number",
+        lastReportedAt: "number|null?",
+        scanStatus: '"clean"|"suspicious"|"malicious"|"pending"|"not-run"?',
+    }),
+    latestRelease: type({
+        releaseId: "string",
+        version: "string",
+        artifactKind: PackageArtifactKindSchema.or("null").optional(),
+        scanStatus: '"clean"|"suspicious"|"malicious"|"pending"|"not-run"',
+        moderationState: PackageReleaseModerationStateSchema.or("null").optional(),
+        moderationReason: "string|null?",
+        blockedFromDownload: "boolean",
+        reasons: "string[]",
+        createdAt: "number",
+    }).or("null"),
+});
 export const PackageArtifactBackfillRequestSchema = type({
     cursor: "string|null?",
     batchSize: "number?",

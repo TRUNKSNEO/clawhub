@@ -214,6 +214,30 @@ type PackageReportListItem = {
   triagedBy?: Id<"users"> | null;
   triageNote?: string | null;
 };
+type PackageModerationStatus = {
+  package: {
+    packageId: Id<"packages">;
+    name: string;
+    displayName: string;
+    family: PackageFamily;
+    channel: PackageChannel;
+    isOfficial: boolean;
+    reportCount: number;
+    lastReportedAt?: number | null;
+    scanStatus?: Doc<"packages">["scanStatus"];
+  };
+  latestRelease: {
+    releaseId: Id<"packageReleases">;
+    version: string;
+    artifactKind?: Doc<"packageReleases">["artifactKind"] | null;
+    scanStatus: PackageReleaseScanStatus;
+    moderationState?: NonNullable<Doc<"packageReleases">["manualModeration"]>["state"] | null;
+    moderationReason?: string | null;
+    blockedFromDownload: boolean;
+    reasons: string[];
+    createdAt: number;
+  } | null;
+};
 
 function getPackageOwnerKey(
   pkg: Pick<PackageDoc, "ownerUserId" | "ownerPublisherId">,
@@ -2456,6 +2480,63 @@ export const triagePackageReportForUserInternal = internalMutation({
       packageId: pkg._id,
       status: args.status,
       reportCount,
+    };
+  },
+});
+
+export const getPackageModerationStatusForUserInternal = internalQuery({
+  args: {
+    actorUserId: v.id("users"),
+    name: v.string(),
+  },
+  handler: async (ctx, args): Promise<PackageModerationStatus> => {
+    const actor = await ctx.db.get(args.actorUserId);
+    if (!actor || actor.deletedAt || actor.deactivatedAt) throw new ConvexError("Unauthorized");
+
+    const pkg = await getPackageByNormalizedName(ctx, normalizePackageName(args.name));
+    if (!pkg || pkg.softDeletedAt) throw new ConvexError("Package not found");
+
+    const canSeeOwnerStatus = await viewerCanAccessPackageOwner(ctx, pkg, actor._id);
+    const canSeeStaffStatus = actor.role === "admin" || actor.role === "moderator";
+    if (!canSeeOwnerStatus && !canSeeStaffStatus) throw new ConvexError("Unauthorized");
+
+    const latestRelease = pkg.latestReleaseId ? await ctx.db.get(pkg.latestReleaseId) : null;
+    const activeLatestRelease =
+      latestRelease && !latestRelease.softDeletedAt ? latestRelease : null;
+    const latestReleaseStatus = activeLatestRelease
+      ? (() => {
+          const releaseScanStatus = resolvePackageReleaseScanStatus(activeLatestRelease);
+          return {
+            releaseId: activeLatestRelease._id,
+            version: activeLatestRelease.version,
+            artifactKind: activeLatestRelease.artifactKind ?? null,
+            scanStatus: releaseScanStatus,
+            moderationState: activeLatestRelease.manualModeration?.state ?? null,
+            moderationReason: activeLatestRelease.manualModeration?.reason ?? null,
+            blockedFromDownload: releaseScanStatus === "malicious",
+            reasons: getPackageModerationQueueReasons(
+              activeLatestRelease,
+              releaseScanStatus,
+              pkg.reportCount ?? 0,
+            ),
+            createdAt: activeLatestRelease.createdAt,
+          };
+        })()
+      : null;
+
+    return {
+      package: {
+        packageId: pkg._id,
+        name: pkg.name,
+        displayName: pkg.displayName,
+        family: pkg.family,
+        channel: pkg.channel,
+        isOfficial: pkg.isOfficial,
+        reportCount: pkg.reportCount ?? 0,
+        lastReportedAt: pkg.lastReportedAt ?? null,
+        scanStatus: latestReleaseStatus?.scanStatus ?? pkg.scanStatus,
+      },
+      latestRelease: latestReleaseStatus,
     };
   },
 });

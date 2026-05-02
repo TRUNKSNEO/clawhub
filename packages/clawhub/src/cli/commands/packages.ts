@@ -11,6 +11,7 @@ import {
   ApiV1PackageArtifactBackfillResponseSchema,
   ApiV1PackageArtifactResponseSchema,
   ApiV1PackageListResponseSchema,
+  ApiV1PackageModerationStatusResponseSchema,
   ApiV1PackageModerationQueueResponseSchema,
   ApiV1PackagePublishResponseSchema,
   ApiV1PackageReadinessResponseSchema,
@@ -145,6 +146,10 @@ type PackageReportListOptions = {
 type PackageReportTriageOptions = {
   status?: PackageReportStatus;
   note?: string;
+  json?: boolean;
+};
+
+type PackageModerationStatusOptions = {
   json?: boolean;
 };
 
@@ -972,6 +977,49 @@ export async function cmdTriagePackageReport(
   } catch (error) {
     spinner?.fail(formatError(error));
     throw error;
+  }
+}
+
+export async function cmdPackageModerationStatus(
+  opts: GlobalOpts,
+  packageName: string,
+  options: PackageModerationStatusOptions = {},
+) {
+  const trimmed = normalizePackageNameOrFail(packageName);
+  const token = await requireAuthToken();
+  const registry = await getRegistry(opts, { cache: true });
+  const result = await apiRequest(
+    registry,
+    {
+      method: "GET",
+      path: `${ApiRoutes.packages}/${encodeURIComponent(trimmed)}/moderation`,
+      token,
+    },
+    ApiV1PackageModerationStatusResponseSchema,
+  );
+
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    return;
+  }
+
+  console.log(`${result.package.name} moderation`);
+  console.log(`  package scan: ${result.package.scanStatus ?? "unknown"}`);
+  console.log(`  open reports: ${result.package.reportCount}`);
+  if (!result.latestRelease) {
+    console.log("  latest release: none");
+    return;
+  }
+  const state = result.latestRelease.moderationState ?? "none";
+  console.log(`  latest: ${result.latestRelease.version}`);
+  console.log(`  release scan: ${result.latestRelease.scanStatus}`);
+  console.log(`  manual state: ${state}`);
+  console.log(`  blocked: ${result.latestRelease.blockedFromDownload ? "yes" : "no"}`);
+  if (result.latestRelease.reasons.length > 0) {
+    console.log(`  reasons: ${result.latestRelease.reasons.join(", ")}`);
+  }
+  if (result.latestRelease.moderationReason) {
+    console.log(`  note: ${result.latestRelease.moderationReason}`);
   }
 }
 

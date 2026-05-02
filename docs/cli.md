@@ -382,6 +382,21 @@ Example:
 clawhub package triage-report packageReports:abc --status triaged --note "quarantined affected release"
 ```
 
+### `package moderation-status`
+
+- Owner/staff command for checking package moderation visibility.
+- Calls `GET /api/v1/packages/{name}/moderation`.
+- Shows current package scan state, open report count, latest release manual
+  moderation state, download block state, and moderation reasons.
+- Flags:
+  - `--json`: machine-readable output.
+
+Example:
+
+```bash
+clawhub package moderation-status @openclaw/example-plugin
+```
+
 ### `package moderation-queue`
 
 - Moderator/admin command for reviewing package releases that need attention.

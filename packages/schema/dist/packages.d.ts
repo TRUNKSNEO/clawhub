@@ -529,6 +529,31 @@ export declare const ApiV1PackageReportTriageResponseSchema: import("arktype/int
     reportCount: number;
 }, {}>;
 export type ApiV1PackageReportTriageResponse = (typeof ApiV1PackageReportTriageResponseSchema)[inferred];
+export declare const ApiV1PackageModerationStatusResponseSchema: import("arktype/internal/variants/object.ts").ObjectType<{
+    package: {
+        packageId: string;
+        name: string;
+        displayName: string;
+        family: "skill" | "code-plugin" | "bundle-plugin";
+        channel: "official" | "community" | "private";
+        isOfficial: boolean;
+        reportCount: number;
+        lastReportedAt?: number | null | undefined;
+        scanStatus?: "clean" | "suspicious" | "malicious" | "pending" | "not-run" | undefined;
+    };
+    latestRelease: {
+        releaseId: string;
+        version: string;
+        scanStatus: "clean" | "suspicious" | "malicious" | "pending" | "not-run";
+        blockedFromDownload: boolean;
+        reasons: string[];
+        createdAt: number;
+        artifactKind?: "legacy-zip" | "npm-pack" | null | undefined;
+        moderationState?: "approved" | "quarantined" | "revoked" | null | undefined;
+        moderationReason?: string | null | undefined;
+    } | null;
+}, {}>;
+export type ApiV1PackageModerationStatusResponse = (typeof ApiV1PackageModerationStatusResponseSchema)[inferred];
 export declare const PackageArtifactBackfillRequestSchema: import("arktype/internal/variants/object.ts").ObjectType<{
     cursor?: string | null | undefined;
     batchSize?: number | undefined;
