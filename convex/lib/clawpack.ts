@@ -16,6 +16,7 @@ type ParsedClawPack = {
   fileCount: number;
   entries: ClawPackEntry[];
   packageJson: Record<string, unknown>;
+  pluginManifest: Record<string, unknown>;
 };
 
 const TAR_BLOCK_SIZE = 512;
@@ -154,6 +155,10 @@ export async function parseClawPack(bytes: Uint8Array): Promise<ParsedClawPack> 
   const entries = parseTarEntries(tarBytes);
   const packageJsonEntry = entries.find((entry) => entry.path === "package.json");
   if (!packageJsonEntry) throw new Error("ClawPack must contain package/package.json");
+  const pluginManifestEntry = entries.find((entry) => entry.path === "openclaw.plugin.json");
+  if (!pluginManifestEntry) {
+    throw new Error("ClawPack must contain package/openclaw.plugin.json");
+  }
 
   let packageJson: unknown;
   try {
@@ -168,6 +173,16 @@ export async function parseClawPack(bytes: Uint8Array): Promise<ParsedClawPack> 
   if (!packageName) throw new Error("ClawPack package.json must declare a name");
   if (!packageVersion) throw new Error("ClawPack package.json must declare a version");
 
+  let pluginManifest: unknown;
+  try {
+    pluginManifest = JSON.parse(textFromBytes(pluginManifestEntry.bytes));
+  } catch {
+    throw new Error("ClawPack openclaw.plugin.json is invalid JSON");
+  }
+  if (!isRecord(pluginManifest)) {
+    throw new Error("ClawPack openclaw.plugin.json must be an object");
+  }
+
   return {
     artifactSha256: toHex(sha256),
     npmIntegrity: `sha512-${toBase64(sha512)}`,
@@ -179,5 +194,6 @@ export async function parseClawPack(bytes: Uint8Array): Promise<ParsedClawPack> 
     fileCount: entries.length,
     entries,
     packageJson,
+    pluginManifest,
   };
 }

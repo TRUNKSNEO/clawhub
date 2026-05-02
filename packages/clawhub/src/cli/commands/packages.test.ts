@@ -1130,6 +1130,34 @@ describe("package commands", () => {
     }
   });
 
+  it("rejects a ClawPack tarball without openclaw.plugin.json", async () => {
+    const workdir = await makeTmpWorkdir();
+    try {
+      const packName = "demo-plugin-1.0.0.tgz";
+      await writeFile(
+        join(workdir, packName),
+        npmPackFixture({
+          "package/package.json": makeCodePluginPackageJson({
+            name: "demo-plugin",
+            displayName: "Demo Plugin",
+            version: "1.0.0",
+          }),
+          "package/dist/index.js": "export const demo = true;\n",
+        }),
+      );
+
+      await expect(
+        cmdPublishPackage(makeOpts(workdir), packName, {
+          sourceRepo: "openclaw/demo-plugin",
+          sourceCommit: "abc123",
+        }),
+      ).rejects.toThrow("ClawPack must contain package/openclaw.plugin.json");
+      expect(httpMocks.apiRequestForm).not.toHaveBeenCalled();
+    } finally {
+      await rm(workdir, { recursive: true, force: true });
+    }
+  });
+
   it("mints a short-lived publish token from GitHub Actions OIDC in CI", async () => {
     const workdir = await makeTmpWorkdir();
     try {
@@ -1562,7 +1590,7 @@ describe("package commands", () => {
     }
   });
 
-  it("rejects code-plugin publish when host targets are missing", async () => {
+  it("publishes code plugins when host targets are missing", async () => {
     const workdir = await makeTmpWorkdir();
     try {
       const folder = join(workdir, "demo-plugin");
@@ -1588,15 +1616,22 @@ describe("package commands", () => {
         "utf8",
       );
 
-      await expect(
-        cmdPublishPackage(makeOpts(workdir), "demo-plugin", {
-          sourceRepo: "openclaw/demo-plugin",
-          sourceCommit: "abc123",
-        }),
-      ).rejects.toThrow(
-        "openclaw.hostTargets is required for external code plugins published to ClawHub.",
-      );
-      expect(httpMocks.apiRequestForm).not.toHaveBeenCalled();
+      httpMocks.apiRequestForm.mockResolvedValueOnce({
+        ok: true,
+        packageId: "pkg_1",
+        releaseId: "rel_1",
+      });
+
+      await cmdPublishPackage(makeOpts(workdir), "demo-plugin", {
+        sourceRepo: "openclaw/demo-plugin",
+        sourceCommit: "abc123",
+      });
+
+      expect(getPublishPayload()).toMatchObject({
+        name: "demo-plugin",
+        family: "code-plugin",
+        version: "1.0.0",
+      });
     } finally {
       await rm(workdir, { recursive: true, force: true });
     }

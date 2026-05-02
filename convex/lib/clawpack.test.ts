@@ -69,11 +69,22 @@ describe("clawpack", () => {
     expect(parsed.npmIntegrity).toMatch(/^sha512-/);
     expect(parsed.npmShasum).toMatch(/^[a-f0-9]{40}$/);
     expect(parsed.artifactSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(parsed.pluginManifest).toEqual({ id: "demo" });
     expect(parsed.entries.map((entry) => entry.path).sort()).toEqual([
       "README.md",
       "openclaw.plugin.json",
       "package.json",
     ]);
+  });
+
+  it("rejects plugin tarballs without openclaw.plugin.json", async () => {
+    const pack = npmPackFixture({
+      "package/package.json": JSON.stringify({ name: "demo", version: "1.0.0" }),
+    });
+
+    await expect(parseClawPack(pack)).rejects.toThrow(
+      "ClawPack must contain package/openclaw.plugin.json",
+    );
   });
 
   it("rejects archives that are not rooted under package/", async () => {
