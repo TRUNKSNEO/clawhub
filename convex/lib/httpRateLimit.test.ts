@@ -1,6 +1,6 @@
 /* @vitest-environment node */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { applyRateLimit, getClientIp } from "./httpRateLimit";
+import { applyRateLimit, getClientIp, RATE_LIMITS } from "./httpRateLimit";
 
 type MockRateLimitStatus = {
   allowed: boolean;
@@ -108,6 +108,13 @@ describe("getClientIp", () => {
     });
     process.env.TRUST_FORWARDED_IPS = "true";
     expect(getClientIp(request)).toBe("203.0.113.9");
+  });
+});
+
+describe("RATE_LIMITS", () => {
+  it("keeps anonymous download bursts installation-friendly", () => {
+    expect(RATE_LIMITS.download.ip).toBeGreaterThanOrEqual(180);
+    expect(RATE_LIMITS.download.key).toBeGreaterThanOrEqual(720);
   });
 });
 

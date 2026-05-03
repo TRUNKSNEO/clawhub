@@ -8,7 +8,7 @@ const RATE_LIMIT_SHARDS = 64;
 export const RATE_LIMITS = {
   read: { ip: 600, key: 2400 },
   write: { ip: 45, key: 180 },
-  download: { ip: 30, key: 180 },
+  download: { ip: 180, key: 720 },
 } as const;
 
 type RateLimitResult = {
