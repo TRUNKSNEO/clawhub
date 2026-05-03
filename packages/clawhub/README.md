@@ -65,15 +65,16 @@ clawhub package publish ./my-plugin-1.0.0.tgz --family code-plugin --dry-run
 clawhub package publish ./my-plugin-1.0.0.tgz --family code-plugin
 ```
 
-For legacy local plugin folders, start with a dry run:
+For local plugin folders, start with a dry run:
 
 ```bash
 clawhub package publish ./my-plugin --family code-plugin --dry-run
 clawhub package publish ./my-plugin --family code-plugin
 ```
 
-Folder publish does not run `npm pack` for you. It remains the compatibility
-path for old ZIP-based package downloads.
+For code plugins, folder publish builds and uploads a ClawPack artifact from
+the package folder. Bundle-plugin folders still use the extracted-file publish
+path.
 
 Use `clawhub package download` to resolve the published artifact through
 ClawHub's explicit artifact route. ClawPack downloads are verified against npm
@@ -117,6 +118,8 @@ This repo also provides an official reusable workflow for plugin repos:
 
 Use `dry_run: true` on pull requests and reserve real publishes for trusted events
 such as `workflow_dispatch` or tag pushes with a `CLAWHUB_TOKEN` secret.
+For monorepos, pass `source_path` to publish the plugin package folder, for
+example `source_path: extensions/codex`.
 
 ## Maintainers
 

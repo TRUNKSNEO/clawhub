@@ -581,8 +581,9 @@ clawhub package set-migration core.search --package @openclaw/search-plugin --ph
 - `.tgz` sources are treated as ClawPack. The CLI uploads the exact npm-pack
   bytes and uses the extracted `package/` contents only for validation and
   metadata prefill.
-- Local folders are still uploaded as extracted files and served through the
-  legacy ZIP compatibility path. The CLI does not run `npm pack` for you.
+- Code-plugin folders are packed into a ClawPack npm tarball before upload so
+  OpenClaw installs can verify the exact artifact. Bundle-plugin folders still
+  use the extracted-file publish path.
 - For GitHub sources, source attribution is auto-populated from the repo, resolved commit, ref, and subpath.
 - For local folders, source attribution is auto-detected from local git when the origin remote points at GitHub.
 - External code plugins must declare `openclaw.compat.pluginApi` and
@@ -605,9 +606,10 @@ clawhub package publish ./my-plugin-1.2.3.tgz --family code-plugin --dry-run
 clawhub package publish ./my-plugin-1.2.3.tgz --family code-plugin
 ```
 
-#### Legacy local folder flow
+#### Local folder flow
 
-Use this only when you intentionally want the old ZIP compatibility path:
+For code plugins, folder publish builds and uploads a ClawPack artifact from
+the package folder:
 
 ```bash
 clawhub package publish ./my-plugin --family code-plugin --dry-run
@@ -693,6 +695,8 @@ jobs:
 Notes:
 
 - The reusable workflow defaults `source` to the caller repo.
+- For monorepos, pass `source_path` so the workflow publishes the plugin
+  package folder, for example `source_path: extensions/codex`.
 - Pin the reusable workflow to a stable tag or full commit SHA. Do not run release publishing from `@main`.
 - `pull_request` should use `dry_run: true` so CI stays non-polluting.
 - Real publishes should be limited to trusted events such as `workflow_dispatch` or tag pushes.
