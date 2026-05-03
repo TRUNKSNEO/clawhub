@@ -51,6 +51,7 @@ type ListSkillsResult = {
       latestVersionId?: Id<"skillVersions">;
     };
     latestVersion: {
+      _id: Id<"skillVersions">;
       version: string;
       createdAt: number;
       changelog: string;
@@ -523,6 +524,7 @@ export async function listSkillsV1Handler(ctx: ActionCtx, request: Request) {
   const resolvedTagsList = await resolveTagsBatch(
     ctx,
     result.items.map((item) => item.skill.tags),
+    result.items.map((item) => item.latestVersion),
   );
 
   const items = result.items.map((item, idx) => ({
@@ -621,7 +623,7 @@ export async function skillsGetRouterV1Handler(ctx: ActionCtx, request: Request)
       return text("Skill not found", 404, rate.headers);
     }
 
-    const [tags] = await resolveTagsBatch(ctx, [result.skill.tags]);
+    const [tags] = await resolveTagsBatch(ctx, [result.skill.tags], [result.latestVersion]);
     return json(
       {
         skill: {

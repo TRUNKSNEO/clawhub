@@ -834,8 +834,9 @@ async function searchPackageCatalogByListing(
 async function resolveSkillTags(
   ctx: ActionCtx,
   tags: Record<string, Id<"skillVersions">>,
+  latestVersion?: SkillVersionLike | null,
 ): Promise<Record<string, string>> {
-  const [resolved] = await resolveTagsBatch(ctx, [tags]);
+  const [resolved] = await resolveTagsBatch(ctx, [tags], [latestVersion]);
   return resolved ?? {};
 }
 
@@ -2265,7 +2266,7 @@ export async function packagesGetRouterV1Handler(ctx: ActionCtx, request: Reques
           skillDetail.skill,
           skillDetail.latestVersion,
           skillDetail.owner,
-          await resolveSkillTags(ctx, skillDetail.skill.tags),
+          await resolveSkillTags(ctx, skillDetail.skill.tags, skillDetail.latestVersion),
         ),
         200,
         rate.headers,
