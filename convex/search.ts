@@ -60,6 +60,8 @@ const POPULARITY_WEIGHT = 0.08;
 const FALLBACK_SCAN_LIMIT = 2000;
 const MIN_STABLE_SEARCH_RECALL_LIMIT = 100;
 const MAX_DIRECT_SKILL_SEARCH_CANDIDATES = 100;
+const MIN_VECTOR_SEARCH_CANDIDATES = 50;
+const MAX_VECTOR_SEARCH_CANDIDATES = 128;
 const SKILL_CAPABILITY_TAG_SET = new Set<string>(SKILL_CAPABILITY_TAGS);
 
 function getNextCandidateLimit(current: number, max: number) {
@@ -188,11 +190,13 @@ export const searchSkills: ReturnType<typeof action> = action({
     // Keep ordinary first-page and load-more requests ranking the same recall pool
     // before slicing, so expanding the display limit does not reshuffle the prefix.
     const recallLimit = Math.max(limit, MIN_STABLE_SEARCH_RECALL_LIMIT);
-    // Convex vectorSearch max limit is 256; clamp candidate sizes accordingly.
-    // Keep the initial pool large enough to catch moderate-vector matches
-    // that win after lexical and popularity scoring, even for small limits.
-    const maxCandidate = Math.min(Math.max(recallLimit * 10, 200), 256);
-    let candidateLimit = Math.min(Math.max(recallLimit * 3, 200), 256);
+    // Keep the vector pool bounded; exact slug, prefix, and lexical fallback cover
+    // literal recall without hydrating hundreds of semantic candidates per search.
+    const maxCandidate = Math.min(
+      Math.max(limit * 4, MIN_VECTOR_SEARCH_CANDIDATES),
+      MAX_VECTOR_SEARCH_CANDIDATES,
+    );
+    let candidateLimit = Math.min(Math.max(limit * 2, MIN_VECTOR_SEARCH_CANDIDATES), maxCandidate);
     let hydrated: SkillSearchEntry[] = [];
     const seenEmbeddingIds = new Set<Id<"skillEmbeddings">>();
     let scoreById = new Map<Id<"skillEmbeddings">, number>();
@@ -664,10 +668,11 @@ export const searchSouls: ReturnType<typeof action> = action({
       vector = null;
     }
     const limit = args.limit ?? 10;
-    // Convex vectorSearch max limit is 256; clamp candidate sizes accordingly.
-    // Match searchSkills so soul search does not miss boosted exact matches.
-    const maxCandidate = Math.min(Math.max(limit * 10, 200), 256);
-    let candidateLimit = Math.min(Math.max(limit * 3, 200), 256);
+    const maxCandidate = Math.min(
+      Math.max(limit * 4, MIN_VECTOR_SEARCH_CANDIDATES),
+      MAX_VECTOR_SEARCH_CANDIDATES,
+    );
+    let candidateLimit = Math.min(Math.max(limit * 2, MIN_VECTOR_SEARCH_CANDIDATES), maxCandidate);
     let hydrated: HydratedSoulEntry[] = [];
     const seenEmbeddingIds = new Set<Id<"soulEmbeddings">>();
     let scoreById = new Map<Id<"soulEmbeddings">, number>();

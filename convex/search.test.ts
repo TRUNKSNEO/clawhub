@@ -1060,17 +1060,18 @@ describe("search helpers", () => {
     expect(result[0].skill.slug).toBe("fallback-skill");
   });
 
-  it("hydrates the stable max vector window for ordinary load-more searches", async () => {
+  it("hydrates a bounded vector window for ordinary load-more searches", async () => {
     generateEmbeddingMock.mockResolvedValueOnce([0, 1, 2]);
 
-    // Ordinary first-page and load-more searches use a stable recall floor, so
-    // candidateLimit starts at the Convex vector maximum.
-    const batch = Array.from({ length: 256 }, (_, i) => ({
+    const batch = Array.from({ length: 128 }, (_, i) => ({
       _id: `skillEmbeddings:e${i}`,
       _score: 0.5 - i * 0.001,
     }));
 
-    const vectorSearchMock = vi.fn().mockResolvedValueOnce(batch);
+    const vectorSearchMock = vi.fn(
+      async (_table: unknown, _index: unknown, opts: { limit: number }) =>
+        batch.slice(0, opts.limit),
+    );
 
     const hydrateCalls: string[][] = [];
     const runQuery = vi.fn(
@@ -1101,9 +1102,10 @@ describe("search helpers", () => {
       { query: "test", limit: 50 },
     );
 
-    expect(vectorSearchMock).toHaveBeenCalledTimes(1);
-    expect(hydrateCalls).toHaveLength(1);
-    expect(hydrateCalls[0]).toHaveLength(256);
+    expect(vectorSearchMock).toHaveBeenCalledTimes(2);
+    expect(hydrateCalls).toHaveLength(2);
+    expect(hydrateCalls[0]).toHaveLength(100);
+    expect(hydrateCalls[1]).toHaveLength(28);
   });
 
   it("merges fallback matches without duplicate skill ids", () => {
@@ -1239,7 +1241,7 @@ describe("soul search", () => {
 
   it("hydrates only new soul embedding ids across vector iterations", async () => {
     generateEmbeddingMock.mockResolvedValueOnce([0, 1, 2]);
-    const firstBatch = Array.from({ length: 200 }, (_, i) => ({
+    const firstBatch = Array.from({ length: 100 }, (_, i) => ({
       _id: i === 0 ? "soulEmbeddings:a" : `soulEmbeddings:filler${i}`,
       _score: i === 0 ? 0.9 : 0.1,
     }));
