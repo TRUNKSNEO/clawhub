@@ -522,6 +522,7 @@ export const lexicalFallbackSkills = internalQuery({
   handler: async (ctx, args): Promise<SkillSearchEntry[]> => {
     if (args.capabilityTag && !SKILL_CAPABILITY_TAG_SET.has(args.capabilityTag)) return [];
     const limit = Math.min(Math.max(args.limit ?? 200, 10), FALLBACK_SCAN_LIMIT);
+    const scanLimit = limit;
     const seenSkillIds = new Set<Id<"skills">>();
     const candidates: HydratableSkill[] = [];
     // Keep digest rows around so we can resolve owner info without hitting users table.
@@ -571,8 +572,8 @@ export const lexicalFallbackSkills = internalQuery({
           .withIndex("by_active_created", (q) => q.eq("softDeletedAt", undefined));
 
     const [recentByUpdated, recentByCreated] = await Promise.all([
-      recentByUpdatedQuery.order("desc").take(FALLBACK_SCAN_LIMIT),
-      recentByCreatedQuery.order("desc").take(FALLBACK_SCAN_LIMIT),
+      recentByUpdatedQuery.order("desc").take(scanLimit),
+      recentByCreatedQuery.order("desc").take(scanLimit),
     ]);
 
     const addDigestCandidates = (digests: typeof recentByUpdated) => {

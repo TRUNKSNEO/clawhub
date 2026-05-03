@@ -238,6 +238,27 @@ describe("search helpers", () => {
     );
   });
 
+  it("uses the requested fallback limit as the digest scan budget", async () => {
+    const ctx = makeLexicalCtx({
+      exactSlugSkill: null,
+      recentSkills: [
+        makeSkillDoc({ id: "skills:updated", slug: "orf-updated", displayName: "ORF Updated" }),
+      ],
+      recentByCreated: [
+        makeSkillDoc({ id: "skills:created", slug: "orf-created", displayName: "ORF Created" }),
+      ],
+    });
+
+    await lexicalFallbackSkillsHandler(ctx, {
+      query: "orf",
+      queryTokens: ["orf"],
+      limit: 25,
+      skipExactSlugLookup: true,
+    });
+
+    expect(ctx.takeLimits).toEqual([25, 25]);
+  });
+
   it("includes exact slug match from by_slug even when recent scan is empty", async () => {
     const exactSlugSkill = makeSkillDoc({ id: "skills:orf", slug: "orf", displayName: "ORF" });
     const ctx = makeLexicalCtx({
@@ -1365,8 +1386,10 @@ function makeLexicalCtx(params: {
   const digestByUpdated = toDigestRows(params.recentSkills);
   const digestByCreated = toDigestRows(params.recentByCreated ?? []);
   const usedIndexes: string[] = [];
+  const takeLimits: number[] = [];
   return {
     usedIndexes,
+    takeLimits,
     db: {
       query: vi.fn((table: string) => {
         if (table === "skills") {
@@ -1389,14 +1412,20 @@ function makeLexicalCtx(params: {
               if (index === "by_active_updated" || index === "by_nonsuspicious_updated") {
                 return {
                   order: () => ({
-                    take: vi.fn().mockResolvedValue(digestByUpdated),
+                    take: vi.fn((limit: number) => {
+                      takeLimits.push(limit);
+                      return Promise.resolve(digestByUpdated);
+                    }),
                   }),
                 };
               }
               if (index === "by_active_created" || index === "by_nonsuspicious_created") {
                 return {
                   order: () => ({
-                    take: vi.fn().mockResolvedValue(digestByCreated),
+                    take: vi.fn((limit: number) => {
+                      takeLimits.push(limit);
+                      return Promise.resolve(digestByCreated);
+                    }),
                   }),
                 };
               }
