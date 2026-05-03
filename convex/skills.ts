@@ -3101,6 +3101,81 @@ function buildPublicSkillEntryFromDigest(
   };
 }
 
+function buildPublicSkillApiListEntryFromDigest(digest: Doc<"skillSearchDigest">) {
+  const publicSkill = toPublicSkill(digestToHydratableSkill(digest));
+  if (!publicSkill) return null;
+  const ownerInfo = digestToOwnerInfo(digest);
+  if (!ownerInfo?.owner) return null;
+  const latestVersion =
+    digest.latestVersionSummary && digest.latestVersionId
+      ? toPublicSkillListVersionFromSummary(digest.latestVersionSummary, digest.latestVersionId)
+      : null;
+
+  return {
+    skill: {
+      _id: publicSkill._id,
+      slug: publicSkill.slug,
+      displayName: publicSkill.displayName,
+      summary: publicSkill.summary,
+      tags: publicSkill.tags,
+      stats: publicSkill.stats,
+      createdAt: publicSkill.createdAt,
+      updatedAt: publicSkill.updatedAt,
+      latestVersionId: publicSkill.latestVersionId,
+    },
+    latestVersion,
+  };
+}
+
+export const listPublicApiPageV1 = query({
+  args: {
+    cursor: v.optional(v.string()),
+    numItems: v.optional(v.number()),
+    sort: v.optional(
+      v.union(
+        v.literal("newest"),
+        v.literal("updated"),
+        v.literal("downloads"),
+        v.literal("installs"),
+        v.literal("stars"),
+        v.literal("name"),
+      ),
+    ),
+    dir: v.optional(v.union(v.literal("asc"), v.literal("desc"))),
+    nonSuspiciousOnly: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const sort = args.sort ?? "newest";
+    const dir = args.dir ?? (sort === "name" ? "asc" : "desc");
+    const numItems = clampInt(args.numItems ?? 25, 1, MAX_PUBLIC_LIST_LIMIT);
+    const indexName = args.nonSuspiciousOnly
+      ? NONSUSPICIOUS_SORT_INDEXES[sort]
+      : SORT_INDEXES[sort];
+    const eqPrefix: IndexKey = args.nonSuspiciousOnly ? [undefined, false] : [undefined];
+    const decodedCursor = args.cursor ? decodeIndexKey(args.cursor) : null;
+    const isFirstPage = !decodedCursor;
+    const result = await getPage(ctx, {
+      table: "skillSearchDigest",
+      startIndexKey: decodedCursor ?? eqPrefix,
+      startInclusive: isFirstPage,
+      endIndexKey: eqPrefix,
+      endInclusive: true,
+      absoluteMaxRows: numItems,
+      order: dir,
+      index: indexName,
+      schema,
+    });
+    const items = result.page
+      .map((digest) => buildPublicSkillApiListEntryFromDigest(digest))
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+    const nextCursor =
+      result.hasMore && result.indexKeys.length > 0
+        ? encodeIndexKey(result.indexKeys[result.indexKeys.length - 1])
+        : null;
+    return { items, nextCursor };
+  },
+});
+
 type PublicSkillCatalogItem = {
   name: string;
   displayName: string;

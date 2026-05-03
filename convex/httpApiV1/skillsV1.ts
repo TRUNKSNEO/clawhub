@@ -508,14 +508,18 @@ export async function listSkillsV1Handler(ctx: ActionCtx, request: Request) {
       nonSuspiciousOnly: nonSuspiciousOnly || undefined,
     })) as ListSkillsResult;
   } else {
-    const pageResult = (await ctx.runQuery(api.skills.listPublicPageV4, {
+    const pageResult = (await ctx.runQuery(api.skills.listPublicApiPageV1, {
       cursor,
       numItems: limit,
       sort: toPublicListSort(sort),
       nonSuspiciousOnly: nonSuspiciousOnly || undefined,
-    })) as { page?: ListSkillsResult["items"]; nextCursor?: string | null };
+    })) as {
+      items?: ListSkillsResult["items"];
+      page?: ListSkillsResult["items"];
+      nextCursor?: string | null;
+    };
     result = {
-      items: pageResult.page ?? [],
+      items: pageResult.items ?? pageResult.page ?? [],
       nextCursor: pageResult.nextCursor ?? null,
     };
   }
