@@ -1466,6 +1466,7 @@ const rateLimits = defineTable({
   updatedAt: v.number(),
 })
   .index("by_key_window", ["key", "windowStart"])
+  .index("by_key_window_shard", ["key", "windowStart", "shard"])
   .index("by_key", ["key"]);
 
 const rateLimitShards = defineTable({
