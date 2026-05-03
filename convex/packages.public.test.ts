@@ -3368,6 +3368,56 @@ describe("packages public queries", () => {
     );
   });
 
+  it("infers owner handle from scoped package names for user package publishes", async () => {
+    const runMutation = vi.fn(async (_ref: unknown, args: Record<string, unknown>) => {
+      if (args.minimumRole === "publisher") {
+        return { publisherId: "publishers:openclaw" };
+      }
+      return { ok: true, packageId: "packages:discord", releaseId: "releases:discord-1" };
+    });
+    const ctx = {
+      runQuery: vi
+        .fn()
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          _id: "users:steipete",
+          githubCreatedAt: Date.now() - 20 * 24 * 60 * 60 * 1000,
+        })
+        .mockResolvedValueOnce(null),
+      runMutation,
+      scheduler: {
+        runAfter: vi.fn(),
+      },
+      storage: {
+        get: vi.fn(),
+      },
+    };
+
+    await expect(
+      publishPackageForUserInternalHandler(ctx as never, {
+        actorUserId: "users:steipete",
+        payload: {
+          name: "@openclaw/discord",
+          displayName: "Discord",
+          family: "bundle-plugin",
+          version: "2026.5.3-beta.2",
+          changelog: "beta",
+          bundle: { hostTargets: ["desktop"] },
+          files: [],
+        },
+      }),
+    ).rejects.toThrow("openclaw.plugin.json is required");
+
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        actorUserId: "users:steipete",
+        ownerHandle: "openclaw",
+        minimumRole: "publisher",
+      }),
+    );
+  });
+
   it("keeps pending-scan packages visible to public reads", async () => {
     vi.mocked(getAuthUserId).mockResolvedValue(null);
     const ctx = {

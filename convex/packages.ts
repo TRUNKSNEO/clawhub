@@ -106,6 +106,12 @@ const vtAnalysisValidator = v.object({
   engineStats: v.optional(vtEngineStatsValidator),
   checkedAt: v.number(),
 });
+
+function inferOwnerHandleFromScopedPackageName(name: string) {
+  const match = /^@([^/]+)\//.exec(name);
+  return match?.[1] || undefined;
+}
+
 const internalRefs = internal as unknown as {
   llmEval: {
     evaluatePackageReleaseWithLlm: unknown;
@@ -3371,12 +3377,13 @@ async function publishPackageImpl(
   } else {
     actorUserId = auth.actorUserId;
     await requireGitHubAccountAge(ctx, actorUserId);
+    const ownerHandle = payload.ownerHandle ?? inferOwnerHandleFromScopedPackageName(name);
     const ownerTarget = await runMutationRef<{
       publisherId: Id<"publishers">;
       linkedUserId?: Id<"users">;
     } | null>(ctx, internalRefs.publishers.resolvePublishTargetForUserInternal, {
       actorUserId,
-      ownerHandle: payload.ownerHandle,
+      ownerHandle,
       minimumRole: "publisher",
     });
     ownerUserId = ownerTarget?.linkedUserId ?? actorUserId;
