@@ -10,6 +10,7 @@ vi.mock("@convex-dev/auth/server", () => ({
 
 vi.mock("./lib/apiTokenAuth", () => ({
   requireApiTokenUser: vi.fn(),
+  getOptionalApiTokenUser: vi.fn(),
   getOptionalApiTokenUserId: vi.fn(),
   requirePackagePublishAuth: vi.fn(),
 }));
@@ -24,8 +25,12 @@ vi.mock("./skills", () => ({
 }));
 
 const { getAuthUserId } = await import("@convex-dev/auth/server");
-const { getOptionalApiTokenUserId, requireApiTokenUser, requirePackagePublishAuth } =
-  await import("./lib/apiTokenAuth");
+const {
+  getOptionalApiTokenUser,
+  getOptionalApiTokenUserId,
+  requireApiTokenUser,
+  requirePackagePublishAuth,
+} = await import("./lib/apiTokenAuth");
 const { fetchGitHubRepositoryIdentity, verifyGitHubActionsTrustedPublishJwt } =
   await import("./lib/githubActionsOidc");
 const { publishVersionForUser } = await import("./skills");
@@ -173,6 +178,8 @@ beforeEach(() => {
   vi.unstubAllEnvs();
   vi.mocked(getAuthUserId).mockReset();
   vi.mocked(getAuthUserId).mockResolvedValue(null);
+  vi.mocked(getOptionalApiTokenUser).mockReset();
+  vi.mocked(getOptionalApiTokenUser).mockResolvedValue(null);
   vi.mocked(getOptionalApiTokenUserId).mockReset();
   vi.mocked(getOptionalApiTokenUserId).mockResolvedValue(null);
   vi.mocked(requireApiTokenUser).mockReset();
@@ -5497,6 +5504,10 @@ describe("httpApiV1 handlers", () => {
   });
 
   it("package publish uses write rate limiting", async () => {
+    vi.mocked(getOptionalApiTokenUser).mockResolvedValue({
+      userId: "users:1",
+      user: { _id: "users:1", handle: "p" },
+    } as never);
     vi.mocked(getOptionalApiTokenUserId).mockResolvedValue("users:1" as never);
     vi.mocked(requirePackagePublishAuth).mockResolvedValue({
       kind: "user",
