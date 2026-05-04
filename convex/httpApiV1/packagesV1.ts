@@ -911,13 +911,7 @@ function bytesToArrayBuffer(bytes: Uint8Array) {
   return copy.buffer;
 }
 
-async function storeClawPackMetadataFile(
-  ctx: ActionCtx,
-  entries: Array<{ path: string; bytes: Uint8Array }>,
-  path: string,
-) {
-  const entry = entries.find((candidate) => candidate.path.toLowerCase() === path.toLowerCase());
-  if (!entry) throw new Error(`ClawPack must contain package/${path}`);
+async function storeClawPackFile(ctx: ActionCtx, entry: { path: string; bytes: Uint8Array }) {
   if (entry.bytes.byteLength > MAX_PUBLISH_FILE_BYTES) {
     throw new Error(getPublishFileSizeError(entry.path));
   }
@@ -932,6 +926,13 @@ async function storeClawPackMetadataFile(
     sha256: await sha256Hex(entry.bytes),
     contentType,
   };
+}
+
+async function storeClawPackFiles(
+  ctx: ActionCtx,
+  entries: Array<{ path: string; bytes: Uint8Array }>,
+) {
+  return await Promise.all(entries.map((entry) => storeClawPackFile(ctx, entry)));
 }
 
 async function parseMultipartPackagePublish(ctx: ActionCtx, request: Request) {
@@ -985,8 +986,7 @@ async function parseMultipartPackagePublish(ctx: ActionCtx, request: Request) {
       npmUnpackedSize: parsed.unpackedSize,
       npmFileCount: parsed.fileCount,
     };
-    files.push(await storeClawPackMetadataFile(ctx, parsed.entries, "package.json"));
-    files.push(await storeClawPackMetadataFile(ctx, parsed.entries, "openclaw.plugin.json"));
+    files.push(...(await storeClawPackFiles(ctx, parsed.entries)));
     return parsePackagePublishBody({ ...payload, files, artifact });
   }
 

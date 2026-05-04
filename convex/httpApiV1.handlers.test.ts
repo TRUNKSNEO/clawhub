@@ -5611,7 +5611,7 @@ describe("httpApiV1 handlers", () => {
     );
   });
 
-  it("multipart ClawPack publish stores the tarball and keeps static/LLM scans metadata-only", async () => {
+  it("multipart ClawPack publish stores the tarball and extracted file metadata", async () => {
     vi.mocked(getOptionalApiTokenUserId).mockResolvedValue("users:1" as never);
     vi.mocked(requirePackagePublishAuth).mockResolvedValue({
       kind: "user",
@@ -5659,7 +5659,7 @@ describe("httpApiV1 handlers", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(storageStore).toHaveBeenCalledTimes(3);
+    expect(storageStore).toHaveBeenCalledTimes(4);
     expect(runAction).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
@@ -5673,6 +5673,7 @@ describe("httpApiV1 handlers", () => {
           files: [
             expect.objectContaining({ path: "package.json", storageId: "storage:2" }),
             expect.objectContaining({ path: "openclaw.plugin.json", storageId: "storage:3" }),
+            expect.objectContaining({ path: "dist/index.js", storageId: "storage:4" }),
           ],
         }),
       }),
@@ -5680,7 +5681,7 @@ describe("httpApiV1 handlers", () => {
     const actionCall = runAction.mock.calls[0];
     expect(actionCall).toBeTruthy();
     const payload = (actionCall[1] as { payload?: { files?: Array<{ path: string }> } }).payload;
-    expect(payload?.files?.map((file) => file.path)).not.toContain("dist/index.js");
+    expect(payload?.files?.map((file) => file.path)).toContain("dist/index.js");
   });
 
   it("package publish routes GitHub Actions auth through the trusted publisher action", async () => {
