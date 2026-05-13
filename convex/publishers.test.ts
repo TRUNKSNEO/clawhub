@@ -9,6 +9,7 @@ import {
   listPublishedPage,
   migrateLegacyPublisherHandleToOrgInternal,
   removeMember,
+  setTrustedPublisherInternal,
   updateProfile,
 } from "./publishers";
 
@@ -106,6 +107,14 @@ const updateProfileHandler = (
     displayName: string;
     bio?: string;
     image?: string;
+  }>
+)._handler;
+
+const setTrustedPublisherInternalHandler = (
+  setTrustedPublisherInternal as unknown as WrappedHandler<{
+    actorUserId: string;
+    publisherId: string;
+    trustedPublisher: boolean;
   }>
 )._handler;
 
@@ -1039,6 +1048,60 @@ describe("publishers membership controls", () => {
         } as never,
       ),
     ).rejects.toThrow("Image must be a valid URL");
+  });
+});
+
+describe("publisher audit logs", () => {
+  it("audits org trusted-publisher changes", async () => {
+    const patch = vi.fn();
+    const insert = vi.fn(async () => "auditLogs:1");
+    const ctx = {
+      db: {
+        get: vi.fn(async (id: string) => {
+          if (id === "users:admin") return { _id: id, role: "admin" };
+          if (id === "publishers:openclaw") {
+            return {
+              _id: id,
+              kind: "org",
+              handle: "openclaw",
+              trustedPublisher: false,
+            };
+          }
+          return null;
+        }),
+        patch,
+        insert,
+        query: vi.fn(),
+        delete: vi.fn(),
+        replace: vi.fn(),
+        normalizeId: vi.fn(),
+      },
+    };
+
+    await setTrustedPublisherInternalHandler(ctx, {
+      actorUserId: "users:admin",
+      publisherId: "publishers:openclaw",
+      trustedPublisher: true,
+    });
+
+    expect(patch).toHaveBeenCalledWith("publishers:openclaw", {
+      trustedPublisher: true,
+      updatedAt: expect.any(Number),
+    });
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "publisher.trusted.set",
+        actorUserId: "users:admin",
+        targetType: "publisher",
+        targetId: "publishers:openclaw",
+        metadata: {
+          handle: "openclaw",
+          previousTrustedPublisher: false,
+          trustedPublisher: true,
+        },
+      }),
+    );
   });
 });
 

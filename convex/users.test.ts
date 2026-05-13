@@ -27,6 +27,8 @@ const {
   liftModerationHoldInternal,
   reserveHandleInternal,
   syncGitHubProfileInternal,
+  updateProfile,
+  deleteAccount,
 } = await import("./users");
 
 type WrappedHandler<TArgs, TResult> = {
@@ -36,6 +38,12 @@ type WrappedHandler<TArgs, TResult> = {
 const meHandler = (me as unknown as WrappedHandler<Record<string, never>, unknown>)._handler;
 const getByHandleHandler = (getByHandle as unknown as WrappedHandler<{ handle: string }, unknown>)
   ._handler;
+const updateProfileHandler = (
+  updateProfile as unknown as WrappedHandler<{ displayName: string; bio?: string }, void>
+)._handler;
+const deleteAccountHandler = (
+  deleteAccount as unknown as WrappedHandler<Record<string, never>, void>
+)._handler;
 
 function makeCtx() {
   const patch = vi.fn();
@@ -867,6 +875,59 @@ describe("users.getByHandle", () => {
 });
 
 describe("users.syncGitHubProfileInternal", () => {
+  it("audits GitHub profile sync and resulting personal publisher creation", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
+    const { ctx, get, insert } = makeCtx();
+    get.mockResolvedValue({
+      _id: "users:other",
+      _creationTime: 1,
+      handle: "old-handle",
+      displayName: "old-handle",
+      name: "old-handle",
+      createdAt: 1,
+    });
+
+    const handler = (
+      syncGitHubProfileInternal as unknown as {
+        _handler: (ctx: unknown, args: unknown) => Promise<void>;
+      }
+    )._handler;
+
+    await handler(ctx, {
+      userId: "users:other",
+      name: "new-handle",
+      image: "https://avatars.githubusercontent.com/u/1",
+      syncedAt: 10,
+    });
+
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "user.profile.sync",
+        actorUserId: "users:other",
+        targetType: "user",
+        targetId: "users:other",
+        metadata: expect.objectContaining({
+          source: "github",
+          previous: expect.objectContaining({ handle: "old-handle" }),
+          next: expect.objectContaining({ handle: "new-handle" }),
+        }),
+      }),
+    );
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "publisher.personal.create",
+        actorUserId: "users:other",
+        targetType: "publisher",
+        metadata: expect.objectContaining({
+          source: "user.profile.sync",
+          created: true,
+        }),
+      }),
+    );
+  });
+
   it("keeps a derived handle unchanged when the new login is reserved", async () => {
     const { ctx, get, patch, query } = makeCtx();
     get.mockResolvedValue({
@@ -1038,6 +1099,95 @@ describe("users.syncGitHubProfileInternal", () => {
     expect(patch).not.toHaveBeenCalledWith(
       "users:other",
       expect.objectContaining({ handle: "openclaw" }),
+    );
+  });
+});
+
+describe("users profile audit logs", () => {
+  afterEach(() => {
+    vi.mocked(requireUser).mockReset();
+  });
+
+  it("audits self-service profile updates", async () => {
+    vi.mocked(requireUser).mockResolvedValue({
+      userId: "users:self",
+      user: { _id: "users:self" },
+    } as never);
+    const { ctx, get, insert } = makeCtx();
+    get.mockResolvedValue({
+      _id: "users:self",
+      _creationTime: 1,
+      handle: "self",
+      displayName: "Old Name",
+      bio: "Old bio",
+      name: "self",
+      createdAt: 1,
+    });
+
+    await updateProfileHandler(ctx, {
+      displayName: "New Name",
+      bio: "New bio",
+    });
+
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "user.profile.update",
+        actorUserId: "users:self",
+        targetType: "user",
+        targetId: "users:self",
+        metadata: {
+          previous: { displayName: "Old Name", bio: "Old bio" },
+          next: { displayName: "New Name", bio: "New bio" },
+        },
+      }),
+    );
+  });
+
+  it("audits self-service account deletion", async () => {
+    vi.mocked(requireUser).mockResolvedValue({
+      userId: "users:self",
+      user: { _id: "users:self" },
+    } as never);
+    const { ctx, get, insert, query } = makeCtx();
+    const runMutation = vi.fn();
+    (ctx as { runMutation?: typeof runMutation }).runMutation = runMutation;
+    get.mockResolvedValue({
+      _id: "users:self",
+      handle: "self",
+      displayName: "Self",
+      name: "self",
+      email: "self@example.com",
+      personalPublisherId: "publishers:self",
+    });
+    query.mockImplementation(((table: string) => {
+      if (table === "apiTokens") {
+        return {
+          withIndex: () => ({
+            collect: vi.fn(async () => []),
+          }),
+        };
+      }
+      throw new Error(`Unexpected table ${table}`);
+    }) as never);
+
+    await deleteAccountHandler(ctx, {});
+
+    expect(insert).toHaveBeenCalledWith(
+      "auditLogs",
+      expect.objectContaining({
+        action: "user.delete",
+        actorUserId: "users:self",
+        targetType: "user",
+        targetId: "users:self",
+        metadata: expect.objectContaining({
+          previous: expect.objectContaining({
+            handle: "self",
+            emailPresent: true,
+            personalPublisherId: "publishers:self",
+          }),
+        }),
+      }),
     );
   });
 });

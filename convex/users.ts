@@ -96,7 +96,10 @@ export const upsertDevPersonaInternal = internalMutation({
     }
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("Dev persona was not created");
-    await ensurePersonalPublisherForUser(ctx, user);
+    await ensurePersonalPublisherForUser(ctx, user, {
+      actorUserId: user._id,
+      source: "dev_persona.upsert",
+    });
     return userId;
   },
 });
@@ -223,8 +226,35 @@ export const syncGitHubProfileInternal = internalMutation({
       updates.updatedAt = Date.now();
     }
     await ctx.db.patch(args.userId, updates);
+    if (didChangeProfile) {
+      await ctx.db.insert("auditLogs", {
+        actorUserId: args.userId,
+        action: "user.profile.sync",
+        targetType: "user",
+        targetId: args.userId,
+        metadata: {
+          source: "github",
+          previous: {
+            name: user.name ?? null,
+            handle: user.handle ?? null,
+            displayName: user.displayName ?? null,
+            image: user.image ?? null,
+          },
+          next: {
+            name: updates.name ?? user.name ?? null,
+            handle: updates.handle ?? user.handle ?? null,
+            displayName: updates.displayName ?? user.displayName ?? null,
+            image: updates.image ?? user.image ?? null,
+          },
+        },
+        createdAt: updates.updatedAt ?? args.syncedAt,
+      });
+    }
     const nextUser = didChangeProfile ? ({ ...user, ...updates } as Doc<"users">) : user;
-    await ensurePersonalPublisherForUser(ctx, nextUser);
+    await ensurePersonalPublisherForUser(ctx, nextUser, {
+      actorUserId: args.userId,
+      source: "user.profile.sync",
+    });
   },
 });
 
@@ -364,7 +394,22 @@ export async function ensureHandler(ctx: MutationCtx) {
   const ensuredUser = hasUpdates
     ? ({ ...user, ...updates } as Doc<"users">)
     : ((await ctx.db.get(userId)) ?? user);
-  await ensurePersonalPublisherForUser(ctx, ensuredUser);
+  await ensurePersonalPublisherForUser(ctx, ensuredUser, {
+    actorUserId: userId,
+    source: "user.ensure",
+  });
+  if (hasUpdates) {
+    await ctx.db.insert("auditLogs", {
+      actorUserId: userId,
+      action: "user.profile.ensure",
+      targetType: "user",
+      targetId: userId,
+      metadata: {
+        changedFields: Object.keys(updates).filter((field) => field !== "updatedAt"),
+      },
+      createdAt: updates.updatedAt as number,
+    });
+  }
   return await ctx.db.get(userId);
 }
 
@@ -375,14 +420,38 @@ export const updateProfile = mutation({
   },
   handler: async (ctx, args) => {
     const { userId } = await requireUser(ctx);
-    await ctx.db.patch(userId, {
-      displayName: args.displayName.trim(),
-      bio: args.bio?.trim(),
-      updatedAt: Date.now(),
-    });
     const user = await ctx.db.get(userId);
-    if (user) {
-      await ensurePersonalPublisherForUser(ctx, user);
+    const now = Date.now();
+    const displayName = args.displayName.trim();
+    const bio = args.bio?.trim();
+    await ctx.db.patch(userId, {
+      displayName,
+      bio,
+      updatedAt: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      actorUserId: userId,
+      action: "user.profile.update",
+      targetType: "user",
+      targetId: userId,
+      metadata: {
+        previous: {
+          displayName: user?.displayName ?? null,
+          bio: user?.bio ?? null,
+        },
+        next: {
+          displayName,
+          bio: bio ?? null,
+        },
+      },
+      createdAt: now,
+    });
+    const nextUser = await ctx.db.get(userId);
+    if (nextUser) {
+      await ensurePersonalPublisherForUser(ctx, nextUser, {
+        actorUserId: userId,
+        source: "user.profile.update",
+      });
     }
   },
 });
@@ -403,6 +472,7 @@ export const deleteAccount = mutation({
       }
     }
 
+    const user = await ctx.db.get(userId);
     await ctx.db.patch(userId, {
       deactivatedAt: now,
       purgedAt: now,
@@ -423,6 +493,23 @@ export const deleteAccount = mutation({
       updatedAt: now,
     });
     await ctx.runMutation(internal.telemetry.clearUserTelemetryInternal, { userId });
+    await ctx.db.insert("auditLogs", {
+      actorUserId: userId,
+      action: "user.delete",
+      targetType: "user",
+      targetId: userId,
+      metadata: {
+        previous: {
+          handle: user?.handle ?? null,
+          displayName: user?.displayName ?? null,
+          name: user?.name ?? null,
+          image: user?.image ?? null,
+          emailPresent: Boolean(user?.email),
+          personalPublisherId: user?.personalPublisherId ?? null,
+        },
+      },
+      createdAt: now,
+    });
   },
 });
 

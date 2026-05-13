@@ -8814,7 +8814,10 @@ export const insertVersion = internalMutation({
     if (!normalizedSlug) throw new ConvexError("Slug is required.");
     const user = await ctx.db.get(userId);
     if (!user || user.deletedAt || user.deactivatedAt) throw new Error("User not found");
-    const personalPublisher = await ensurePersonalPublisherForUser(ctx, user);
+    const personalPublisher = await ensurePersonalPublisherForUser(ctx, user, {
+      actorUserId: userId,
+      source: "skill.publish",
+    });
     if (!personalPublisher) throw new ConvexError("Personal publisher not found");
     // `callerExplicitlySpecifiedOwner` distinguishes the two semantically
     // different reasons we end up with `ownerPublisherId === personalPublisher._id`:

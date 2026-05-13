@@ -579,7 +579,10 @@ async function migrateLegacyPublisherHandleToOrgWithActor(
     });
   }
 
-  const ensuredPersonalPublisher = await ensurePersonalPublisherForUser(ctx, nextLegacyUser);
+  const ensuredPersonalPublisher = await ensurePersonalPublisherForUser(ctx, nextLegacyUser, {
+    actorUserId: args.actorUserId,
+    source: "publisher.legacy_handle.migrate",
+  });
 
   const packages = await ctx.db
     .query("packages")
@@ -754,7 +757,10 @@ export const ensurePersonalPublisherInternal = internalMutation({
   handler: async (ctx, args) => {
     const user = await ctx.db.get(args.userId);
     if (!user || user.deletedAt || user.deactivatedAt) return null;
-    return await ensurePersonalPublisherForUser(ctx, user);
+    return await ensurePersonalPublisherForUser(ctx, user, {
+      actorUserId: user._id,
+      source: "publisher.ensure_personal_internal",
+    });
   },
 });
 
@@ -771,7 +777,10 @@ export const resolvePublishTargetForUserInternal = internalMutation({
     if (!actor || actor.deletedAt || actor.deactivatedAt) throw new ConvexError("Unauthorized");
     const minimumRole = args.minimumRole ?? "publisher";
     const requestedHandle = normalizePublisherHandle(args.ownerHandle);
-    const personal = await ensurePersonalPublisherForUser(ctx, actor);
+    const personal = await ensurePersonalPublisherForUser(ctx, actor, {
+      actorUserId: actor._id,
+      source: "publisher.resolve_target",
+    });
     if (!personal) throw new ConvexError("Personal publisher not found");
     if (!requestedHandle) {
       return {
@@ -1132,7 +1141,10 @@ export const createOrg = mutation({
   },
   handler: async (ctx, args) => {
     const { user, userId } = await requireUser(ctx);
-    await ensurePersonalPublisherForUser(ctx, user);
+    await ensurePersonalPublisherForUser(ctx, user, {
+      actorUserId: userId,
+      source: "publisher.create_org",
+    });
 
     const handle = validateHandle(args.handle);
     const existingPublisher = await getPublisherByHandle(ctx, handle);
@@ -1297,7 +1309,10 @@ export const addMember = mutation({
     if (!targetUser) {
       throw new ConvexError(`User "@${handle}" not found`);
     }
-    await ensurePersonalPublisherForUser(ctx, targetUser);
+    await ensurePersonalPublisherForUser(ctx, targetUser, {
+      actorUserId: userId,
+      source: "publisher.member.upsert",
+    });
     const existing = await getPublisherMembership(ctx, publisher._id, targetUser._id);
     const now = Date.now();
     if (existing) {
@@ -1382,9 +1397,23 @@ export const setTrustedPublisherInternal = internalMutation({
     const actor = await ctx.db.get(args.actorUserId);
     if (!actor || actor.deletedAt || actor.deactivatedAt) throw new ConvexError("Unauthorized");
     assertAdmin(actor);
+    const publisher = await ctx.db.get(args.publisherId);
+    const now = Date.now();
     await ctx.db.patch(args.publisherId, {
       trustedPublisher: args.trustedPublisher,
-      updatedAt: Date.now(),
+      updatedAt: now,
+    });
+    await ctx.db.insert("auditLogs", {
+      actorUserId: args.actorUserId,
+      action: args.trustedPublisher ? "publisher.trusted.set" : "publisher.trusted.unset",
+      targetType: "publisher",
+      targetId: args.publisherId,
+      metadata: {
+        handle: publisher?.handle ?? null,
+        previousTrustedPublisher: publisher?.trustedPublisher ?? null,
+        trustedPublisher: args.trustedPublisher,
+      },
+      createdAt: now,
     });
   },
 });

@@ -4,6 +4,10 @@
 
 ### Changes
 
+- Admin/Ops: audit profile syncs, self-service account/profile changes, personal
+  publisher syncs, and org trusted-publisher changes so slug and ownership
+  investigations have a complete ledger.
+
 ### Fixes
 
 - Web: keep skill/plugin detail tabs at mobile-friendly touch target height.

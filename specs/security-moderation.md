@@ -84,6 +84,10 @@ See also: [acceptable-usage.md](./acceptable-usage.md) for the marketplace polic
 - `auditLogs` remains the global compliance/security ledger. Product-facing
   moderation timelines live in `skillModerationEventLogs` and
   `packageModerationEventLogs`.
+- Ownership-adjacent identity changes must also write `auditLogs`: user profile
+  sync/update/ensure/delete, personal publisher create/sync, and org trusted
+  publisher set/unset. Personal publisher sync should log meaningful create,
+  change, link, or membership events, not routine login refreshes.
 - Public queries hide non-active moderation statuses; moderators can still access via
   moderator-only queries and unhide/restore/delete/ban.
 - Legacy report rows with `status: "triaged"` are read as `confirmed` for
